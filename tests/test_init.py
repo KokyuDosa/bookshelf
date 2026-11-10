@@ -4,7 +4,7 @@ from contextlib import closing
 from bookshelf.cli import main
 
 
-def test_init_creates_db_at_lastest_version(tmp_path):
+def test_init_creates_db_at_latest_version(tmp_path):
     db = tmp_path / "books.db"
     assert main(["--db", str(db), "init"]) == 0
     with closing(sqlite3.connect(db)) as conn:
