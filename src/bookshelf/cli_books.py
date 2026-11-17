@@ -1,6 +1,8 @@
-"""The everyday commands: add, search, enrich, export, publish."""
+"""The everyday commands: add, show, edit, search, enrich, export, publish."""
 
 import argparse
+import datetime as dt
+import json
 import sqlite3
 import sys
 from contextlib import closing
@@ -9,6 +11,16 @@ from pathlib import Path
 from bookshelf import migrations
 from bookshelf.catalog import Credit, NewBook, add_book, find_by_natural_key
 from bookshelf.db import connect
+from bookshelf.editing import (
+    CLEARABLE,
+    Edit,
+    apply_edit,
+    changes,
+    details,
+    flatten,
+    format_details,
+    resolve,
+)
 from bookshelf.entry import enrich, find_owned, lookup_code
 from bookshelf.export import public_books, write_export
 from bookshelf.importers.mapping import normalize_edition, parse_money_cents
@@ -107,13 +119,12 @@ def _add(conn: sqlite3.Connection, args: argparse.Namespace) -> int:
             print(f"{exc}. Enter the details yourself.")
 
     title = args.title or (found.title if found else None)
-    authors = args.author or (found.authors if found else [])
+    credits = args.credits or [Credit(a) for a in (found.authors if found else [])]
     if not title and interactive():
         title = ask("Title")
-        if not authors:
-            authors = [
-                a.strip() for a in ask("Authors, separated by ; (optional)").split(";") if a.strip()
-            ]
+        if not credits:
+            names = ask("Authors, separated by ; (optional)").split(";")
+            credits = [Credit(a.strip()) for a in names if a.strip()]
     if not title:
         return fail("No title. Give one with --title, or an ISBN Open Library knows.")
 
@@ -121,7 +132,7 @@ def _add(conn: sqlite3.Connection, args: argparse.Namespace) -> int:
         book = NewBook(
             title=title,
             subtitle=args.subtitle or (found.subtitle if found else None),
-            credits=[Credit(a) for a in authors],
+            credits=credits,
             isbn=isbn13,
             publisher=args.publisher or (found.publisher if found else None),
             pub_year=args.year or (found.pub_year if found else None),
@@ -185,6 +196,127 @@ def _add(conn: sqlite3.Connection, args: argparse.Namespace) -> int:
     return 0
 
 
+# ---------------------------------------------------------------- show and edit
+
+
+def pick(conn: sqlite3.Connection, ref: str) -> int | None:
+    """The book a reference means, or None after explaining why there isn't exactly one."""
+    try:
+        found = resolve(conn, ref)
+    except ValueError as exc:
+        fail(str(exc))
+        return None
+    if found.book_id is not None:
+        return found.book_id
+    if found.candidates:
+        fail(f"{len(found.candidates)} books match {ref!r}; use the number of the one you mean:")
+        for book_id, text in found.candidates[:15]:
+            print(f"  {book_id:>5}  {text}", file=sys.stderr)
+    else:
+        fail(f"No book matches {ref!r}.")
+    return None
+
+
+def cmd_show(args: argparse.Namespace) -> int:
+    conn = open_db(args.db)
+    if conn is None:
+        return 1
+    with closing(conn):
+        book_id = pick(conn, " ".join(args.book))
+        if book_id is None:
+            return 1
+        d = details(conn, book_id)
+    print(json.dumps(d, indent=2, ensure_ascii=False) if args.json else format_details(d))
+    return 0
+
+
+def build_edit(conn: sqlite3.Connection, args: argparse.Namespace) -> Edit:
+    """Command-line options -> an Edit. ValueError for values that can't be used."""
+    e = Edit(
+        series=args.series,
+        clear=args.clear or [],
+        credits=args.credits,
+        add_tags=args.add_tag or [],
+        remove_tags=args.remove_tag or [],
+        remove_on=args.remove,
+        restore=args.restore,
+    )
+    for name in (
+        "title",
+        "subtitle",
+        "isbn",
+        "publisher",
+        "language",
+        "shelf",
+        "cover",
+        "year",
+        "pages",
+        "copies",
+        "volume",
+        "acquired",
+    ):
+        value = getattr(args, name.replace("-", "_"))
+        if value is not None:
+            e.set_book[name] = value
+    if args.ol_key is not None:
+        e.set_book["ol-key"] = args.ol_key
+    if args.edition is not None:
+        e.set_book["edition"] = normalize_edition(args.edition)
+    if args.format is not None:
+        e.set_book["format"] = lookup_code(conn, "format", args.format)
+    if args.condition is not None:
+        e.set_book["condition"] = lookup_code(conn, "condition", args.condition)
+    for name in ("price", "value"):
+        if getattr(args, name) is not None:
+            e.set_private[name] = parse_money_cents(getattr(args, name))
+    for name in ("notes", "loaned_to", "loaned_on"):
+        if getattr(args, name) is not None:
+            e.set_private[name.replace("_", "-")] = getattr(args, name)
+    if args.remove and args.restore:
+        raise ValueError("--remove and --restore can't be used together")
+    return e
+
+
+def cmd_edit(args: argparse.Namespace) -> int:
+    conn = open_db(args.db)
+    if conn is None:
+        return 1
+    with closing(conn):
+        book_id = pick(conn, args.book)
+        if book_id is None:
+            return 1
+        try:
+            edit = build_edit(conn, args)
+        except ValueError as exc:
+            return fail(str(exc))
+        if edit.is_empty():
+            return fail(
+                "Nothing to change. Try options like --isbn, --title or --clear isbn "
+                "(bookshelf edit --help lists them all)."
+            )
+        before = flatten(details(conn, book_id))
+        try:
+            apply_edit(conn, book_id, edit)
+        except (ValueError, sqlite3.IntegrityError) as exc:
+            conn.rollback()
+            return fail(f"Not changed: {exc}")
+        after = flatten(details(conn, book_id))
+        diff = changes(before, after)
+        if not diff:
+            conn.rollback()
+            print(f"No change: book {book_id} already has those values.")
+            return 0
+        print(f"Book {book_id}: {after['title']}")
+        print("\n".join(diff))
+        if interactive() and not args.yes and not confirm("Save these changes?"):
+            conn.rollback()
+            print("Nothing changed.")
+            return 1
+        conn.commit()
+    print("Saved. Run 'bookshelf publish' to update the website.")
+    return 0
+
+
 # ---------------------------------------------------------------- search
 
 
@@ -209,7 +341,7 @@ def cmd_search(args: argparse.Namespace) -> int:
         else "In the collection:"
     )
     for book in result.books[: args.limit]:
-        print(f"  {describe(book)}")
+        print(f"  {book['id']:>5}  {describe(book)}")
     if len(result.books) > args.limit:
         print(f"  … and {len(result.books) - args.limit} more (use --limit)")
     return 0
@@ -263,12 +395,30 @@ def cmd_publish(args: argparse.Namespace) -> int:
     return 0
 
 
+def add_credit_options(p: argparse.ArgumentParser, verb: str) -> None:
+    """--author, --editor, --translator, --illustrator: kept in the order you type them."""
+    for flag, role in (
+        ("--author", "author"),
+        ("--editor", "editor"),
+        ("--translator", "translator"),
+        ("--illustrator", "illustrator"),
+    ):
+        p.add_argument(
+            flag,
+            dest="credits",
+            action="append",
+            metavar="NAME",
+            type=lambda name, role=role: Credit(name.strip(), role),
+            help=f"{verb}; repeat for several people",
+        )
+
+
 def register(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser("add", help="add a book by ISBN, or by hand")
     p.add_argument("isbn", nargs="?", help="ISBN-10 or ISBN-13, hyphens allowed")
     p.add_argument("--title")
     p.add_argument("--subtitle")
-    p.add_argument("--author", action="append", help="repeat for each author, in credit order")
+    add_credit_options(p, "credit a person")
     p.add_argument("--series", help="series or game line, e.g. 'One Piece' or 'DND 3.5'")
     p.add_argument("--volume", type=float, help="number in the series, e.g. 12 (needs --series)")
     p.add_argument("--edition", help="e.g. 2nd, Omnibus, Gold Edition")
@@ -291,6 +441,54 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--offline", action="store_true", help="don't ask Open Library")
     p.add_argument("--yes", "-y", action="store_true", help="add without asking to confirm")
     p.set_defaults(func=cmd_add)
+
+    p = sub.add_parser("show", help="every stored value for one book, private ones included")
+    p.add_argument("book", nargs="+", help="book number, ISBN, or words from the title")
+    p.add_argument("--json", action="store_true", help="print as JSON")
+    p.set_defaults(func=cmd_show)
+
+    today = dt.date.today().isoformat()
+    p = sub.add_parser("edit", help="change or clear any value of one book")
+    p.add_argument("book", help="book number, ISBN, or words from the title (quote several words)")
+    for name in ("title", "subtitle", "isbn", "publisher", "edition", "language", "shelf", "notes"):
+        p.add_argument(f"--{name}")
+    p.add_argument("--series", help="move the book into this series (created if new)")
+    p.add_argument("--volume", type=float, help="number in the series")
+    p.add_argument(
+        "--format",
+        help="hardcover, trade paperback, mass market, paperback, box set, ebook, audiobook, other",
+    )
+    p.add_argument("--condition", help="mint, like new, excellent, very good, good, fair, poor")
+    p.add_argument("--year", type=int)
+    p.add_argument("--pages", type=int)
+    p.add_argument("--copies", type=int)
+    p.add_argument("--acquired", metavar="DATE", help="e.g. 2024-06-01")
+    p.add_argument("--price", help="what you paid, e.g. 12.50; private")
+    p.add_argument("--value", help="estimated value, e.g. 45.00; private")
+    p.add_argument("--loaned-to", metavar="NAME")
+    p.add_argument("--loaned-on", metavar="DATE")
+    p.add_argument("--cover", metavar="URL")
+    p.add_argument("--ol-key", metavar="KEY", help="Open Library edition key, e.g. OL7353617M")
+    add_credit_options(p, "replace all credits with these people")
+    p.add_argument("--add-tag", action="append", metavar="TAG")
+    p.add_argument("--remove-tag", action="append", metavar="TAG")
+    p.add_argument(
+        "--clear",
+        action="append",
+        choices=CLEARABLE,
+        metavar="FIELD",
+        help=f"empty a field; repeat for several. One of: {', '.join(CLEARABLE)}",
+    )
+    p.add_argument(
+        "--remove",
+        nargs="?",
+        const=today,
+        metavar="DATE",
+        help="mark as gone (given away, sold); kept in the database, off the website",
+    )
+    p.add_argument("--restore", action="store_true", help="undo --remove")
+    p.add_argument("--yes", "-y", action="store_true", help="save without asking to confirm")
+    p.set_defaults(func=cmd_edit)
 
     p = sub.add_parser("search", help="do I own this? title, series, author or ISBN")
     p.add_argument("query", nargs="+")

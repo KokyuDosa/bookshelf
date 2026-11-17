@@ -26,12 +26,43 @@ bookshelf publish
 | Add a manga volume | `bookshelf add 9781421534466 --series "One Piece" --volume 52 --tag Manga` |
 | Add an omnibus | `bookshelf add --title "Berserk Deluxe Edition" --series "Berserk Deluxe" --volume 1 --edition Omnibus --format hardcover` |
 | Add a book with no ISBN | `bookshelf add --title "The Time Machine" --author "H. G. Wells" --year 1895` |
+| Add a translation or anthology | `--author`, `--translator`, `--editor`, `--illustrator`, in credit order |
+| See or fix one book | `bookshelf show 56`, `bookshelf edit 56 --clear isbn` (see below) |
 | Count a second copy | `bookshelf add 9780786928866 --another-copy` |
 | Keep a book off the website | add `--hidden` |
 | Record its value (private) | add `--value 45.00` |
 | Fill in details from Open Library | `bookshelf enrich` (re-runs are free: answers are cached) |
 | See what needs attention | `bookshelf review`, then `bookshelf review --resolve 1 ignored` |
 | Update the website | `bookshelf publish` |
+
+## Looking at and fixing one book
+
+`search` prints each book's number. `show` and `edit` take that number, an ISBN in any form,
+or words from the title (put several words in quotes for `edit`). In PowerShell write `56`,
+not `#56`: a `#` starts a comment there.
+
+| To | Run |
+| --- | --- |
+| See every stored value, private ones included | `bookshelf show 56` |
+| The same as JSON | `bookshelf show 56 --json` |
+| Remove a wrong ISBN | `bookshelf edit 56 --clear isbn` |
+| Correct it | `bookshelf edit 56 --isbn 0-7869-2893-X` |
+| Fix several things at once | `bookshelf edit 56 --year 2003 --publisher "Wizards of the Coast" --condition "very good"` |
+| Replace the credits (order kept) | `bookshelf edit 56 --author "Skip Williams" --author "Jonathan Tweet" --editor "Kim Mohan"` |
+| Move into a series | `bookshelf edit "berserk deluxe" --series "Berserk Deluxe" --volume 1` |
+| Tags | `bookshelf edit 56 --add-tag Classics --remove-tag TTRPG` |
+| Private details | `--value 120`, `--price 45`, `--notes "Signed"`, `--loaned-to Sam --loaned-on 2026-11-01` |
+| Empty any field | `--clear FIELD` (repeatable): isbn, series, volume, authors, tags, value, loan, … |
+| Gave it away or sold it | `bookshelf edit 56 --remove` (today) or `--remove 2026-11-17` |
+| Changed your mind | `bookshelf edit 56 --restore` |
+
+`edit` prints each change as `old -> new` and asks before saving (`--yes` skips the question).
+Anything it refuses changes nothing. Clears happen before sets, so `--clear series --series X`
+moves a book in one go. A removed book stays in the database with its history, drops out of
+searches and the website, and is never re-added by a re-import. Edits survive re-importing an
+unchanged MyStuff2 export, because unchanged rows are skipped.
+
+## Adding: details
 
 `add` shows what it found and asks before saving; `--yes` skips the question. With an ISBN it
 asks Open Library for the details, and anything you type as an option wins over what it finds.
