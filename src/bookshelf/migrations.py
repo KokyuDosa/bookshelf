@@ -45,6 +45,10 @@ def backup(conn: sqlite3.Connection, db_path: Path, version: int) -> Path:
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     dest = db_path.parent / "backups" / f"{db_path.stem}-v{version}-{stamp}.db"
     dest.parent.mkdir(parents=True, exist_ok=True)
+    n = 1
+    while dest.exists():  # two backups in the same second must not overwrite each other
+        n += 1
+        dest = dest.with_name(f"{db_path.stem}-v{version}-{stamp}-{n}.db")
     with closing(sqlite3.connect(dest)) as target:  # `with connect()` alone does NOT close
         conn.backup(target)
     return dest

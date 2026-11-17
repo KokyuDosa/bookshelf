@@ -71,3 +71,52 @@ def test_private_fields_go_to_side_table(seeded):
     assert seeded.execute("SELECT count(*) FROM book_private").fetchone()[0] == 2
     cols = [r[1] for r in seeded.execute("PRAGMA table_info(books)")]
     assert not {"purchase_price_cents", "notes", "loaned_to"} & set(cols)
+
+
+def test_series_is_part_of_the_natural_key(db):
+    a = add_book(db, NewBook("Core Rulebook", series="Ashen Stars"))
+    b = add_book(db, NewBook("Core Rulebook", series="Cyberpunk Red"))
+    keys = [
+        r[0] for r in db.execute("SELECT natural_key FROM books WHERE book_id IN (?, ?)", (a, b))
+    ]
+    assert keys == ["ashen stars core rulebook||", "cyberpunk red core rulebook||"]
+
+
+def test_update_overwrite_replaces_supplied_values_only(db):
+    from bookshelf.catalog import update_book
+
+    book_id = add_book(db, NewBook("Old", [Credit("Ben Robbins")], pub_year=2010, edition="1st"))
+    update_book(db, book_id, NewBook("New", [Credit("Kenneth Hite")], edition="2nd"), "overwrite")
+    row = db.execute("SELECT * FROM books WHERE book_id = ?", (book_id,)).fetchone()
+    assert (row["title"], row["edition"], row["pub_year"]) == ("New", "2nd", 2010)
+    assert row["natural_key"] == "new|hite kenneth|2010"
+    names = [
+        r[0]
+        for r in db.execute(
+            "SELECT a.display_name FROM book_authors JOIN authors a USING (author_id)"
+        )
+    ]
+    assert names == ["Kenneth Hite"]
+
+
+def test_update_fill_never_replaces(db):
+    from bookshelf.catalog import update_book
+
+    book_id = add_book(
+        db, NewBook("Mine", [Credit("Ben Robbins")], copies=3, estimated_value_cents=500)
+    )
+    update_book(
+        db,
+        book_id,
+        NewBook(
+            "Theirs", [Credit("Kenneth Hite")], publisher="Lame Mage", estimated_value_cents=900
+        ),
+        "fill",
+    )
+    row = db.execute(
+        "SELECT b.title, b.copies, b.publisher, p.estimated_value_cents FROM books b "
+        "JOIN book_private p USING (book_id) WHERE book_id = ?",
+        (book_id,),
+    ).fetchone()
+    assert tuple(row) == ("Mine", 3, "Lame Mage", 500)
+    assert db.execute("SELECT count(*) FROM book_authors").fetchone()[0] == 1

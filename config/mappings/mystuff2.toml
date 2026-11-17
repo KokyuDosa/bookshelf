@@ -1,0 +1,47 @@
+# MyStuff2 Pro CSV export -> bookshelf.
+# Export settings: header row ON, comma delimiter, double-quote text delimiter, "|" multi-value
+# delimiter. Column names are your category's attribute names; a column missing from a file is
+# treated as empty, so one mapping serves every category with these attributes.
+
+source = "mystuff2"
+key_column = "item id"          # MyStuff2's stable per-item ID: what makes re-imports safe
+multi_value_delimiter = "|"
+
+[fields]                        # bookshelf field = column name in the export
+title = "title"
+authors = "author"              # several names joined by the multi-value delimiter
+publisher = "publisher"
+tags = "genre"                  # several genres -> several tags
+pages = "pages"
+edition = "edition"
+condition = "quality"
+estimated_value = "price"       # market value, stored privately
+isbn = "item barcode"
+# Not mapped (kept in the stored raw row): item container, item bundles, item images,
+# item attachments, item colors, item created, item updated.
+
+[title_rules]
+series_separator = ";"          # "DND 3.5; Monster Manual" -> series "DND 3.5", title "Monster Manual"
+extract_copies = true           # "(2 Copies)" -> copies = 2
+extract_format = true           # "(Hardcover)", "Box Set" -> format
+
+# Your MyStuff2 condition words -> the conditions table. Keys are matched after normalisation
+# (case, punctuation and spacing ignored). An unknown word is imported as no condition and
+# added to the review list.
+[condition_values]
+"mint" = "mint"
+"new" = "mint"
+"like new" = "like_new"
+"ex" = "excellent"
+"excellent" = "excellent"
+"vg" = "very_good"
+"very good" = "very_good"
+"good" = "good"
+"fair" = "fair"
+"poor" = "poor"
+
+# Spelling variants of one publisher -> the name to store. Matched after normalisation.
+[publisher_aliases]
+"Chaosium Inc." = "Chaosium"
+"Catalyst" = "Catalyst Game Labs"
+"Massif Press, 2019" = "Massif Press"

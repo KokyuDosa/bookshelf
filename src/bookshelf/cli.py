@@ -4,12 +4,72 @@ import tempfile
 from contextlib import closing
 from pathlib import Path
 
-from bookshelf import migrations
+from bookshelf import cli_books, migrations
 from bookshelf.db import connect
+from bookshelf.importers.mapping import Mapping
+from bookshelf.importers.pipeline import format_report, import_file, load_corrections
 from bookshelf.paths import DEFAULT_DB, PROJECT_ROOT, SCHEMA_DIR
 from bookshelf.seed import seed
 
 SAMPLE_DB = PROJECT_ROOT / "data" / "sample.db"
+MAPPINGS_DIR = PROJECT_ROOT / "config" / "mappings"
+RESOLUTIONS = ("distinct", "merged", "ignored")
+
+
+def cmd_import(args: argparse.Namespace) -> int:
+    if not args.db.exists():
+        print(f"{args.db} does not exist. Run 'bookshelf init' first.", file=sys.stderr)
+        return 1
+    mapping_file = MAPPINGS_DIR / f"{args.mapping}.toml"
+    if not mapping_file.exists():
+        print(f"No mapping {mapping_file}", file=sys.stderr)
+        return 1
+    # Corrections can hold private values (prices), so they live in the git-ignored data folder.
+    corrections_file = (
+        args.corrections or args.db.parent / "imports" / f"{args.mapping}-corrections.toml"
+    )
+    try:
+        mapping = Mapping.load(mapping_file)
+        corrections = load_corrections(corrections_file)
+        report = import_file(args.db, args.file, mapping, corrections, dry_run=args.dry_run)
+    except (OSError, ValueError) as exc:
+        print(f"import failed, nothing saved: {exc}", file=sys.stderr)
+        return 1
+    if corrections:
+        print(f"Applied corrections from {corrections_file}")
+    print(format_report(report))
+    return 0
+
+
+def cmd_review(args: argparse.Namespace) -> int:
+    with closing(connect(args.db)) as conn:
+        if args.resolve:
+            flag_id, resolution = args.resolve
+            if resolution not in RESOLUTIONS or not flag_id.isdigit():
+                print(f"Usage: --resolve FLAG_ID {'|'.join(RESOLUTIONS)}", file=sys.stderr)
+                return 1
+            with conn:
+                done = conn.execute(
+                    "UPDATE review_flags SET resolution = ?, "
+                    "resolved_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
+                    "WHERE flag_id = ? AND resolved_at IS NULL",
+                    (resolution, int(flag_id)),
+                ).rowcount
+            print(
+                f"Resolved flag {flag_id} as {resolution}." if done else f"No open flag {flag_id}."
+            )
+            return 0 if done else 1
+        rows = conn.execute(
+            "SELECT f.flag_id, b.title, s.name AS series, f.reason, f.details "
+            "FROM review_flags f JOIN books b USING (book_id) LEFT JOIN series s USING (series_id) "
+            "WHERE f.resolved_at IS NULL ORDER BY f.reason, b.sort_title"
+        ).fetchall()
+    if not rows:
+        print("Nothing to review.")
+    for r in rows:
+        title = f"{r['series']}; {r['title']}" if r["series"] else r["title"]
+        print(f"{r['flag_id']:5}  {title[:50]:50}  {r['reason']}: {r['details']}")
+    return 0
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -69,11 +129,6 @@ def cmd_snapshot(args: argparse.Namespace) -> int:
     return 0
 
 
-def not_implemented(args: argparse.Namespace) -> int:
-    print(f"'{args.command}' is not implemented yet.")
-    return 0
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="bookshelf", description="Book collection tools")
     parser.add_argument(
@@ -91,8 +146,24 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("snapshot", help="regenerate schema/snapshot.sql").set_defaults(
         func=cmd_snapshot
     )
-    for name in ("import", "add", "search", "export", "publish"):
-        sub.add_parser(name).set_defaults(func=not_implemented)
+    p_import = sub.add_parser("import", help="import an export file (.csv, .tsv or .zip)")
+    p_import.add_argument("file", type=Path)
+    p_import.add_argument("--mapping", default="mystuff2", help="config/mappings/<name>.toml")
+    p_import.add_argument(
+        "--corrections",
+        type=Path,
+        help="per-item fixes (default: data/imports/<mapping>-corrections.toml, if present)",
+    )
+    p_import.add_argument("--dry-run", action="store_true", help="run every step, save nothing")
+    p_import.set_defaults(func=cmd_import)
+
+    p_review = sub.add_parser("review", help="list open review flags, or resolve one")
+    p_review.add_argument(
+        "--resolve", nargs=2, metavar=("FLAG_ID", "|".join(RESOLUTIONS)), help="close a flag"
+    )
+    p_review.set_defaults(func=cmd_review)
+
+    cli_books.register(sub)
     return parser
 
 

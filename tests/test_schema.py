@@ -202,3 +202,18 @@ def test_active_books_hides_removed(db):
     add_book(db, "Kept")
     add_book(db, "Given away", removed_on="2026-03-01")
     assert [r[0] for r in db.execute("SELECT title FROM active_books")] == ["Kept"]
+
+
+def test_condition_list_matches_mystuff2_vocabulary(db):
+    codes = [r[0] for r in db.execute("SELECT condition FROM conditions ORDER BY sort_order")]
+    assert codes == ["mint", "like_new", "excellent", "very_good", "good", "fair", "poor"]
+
+
+def test_box_set_is_a_format(db):
+    add_book(db, format="box_set")
+
+
+def test_edition_is_null_not_blank(db):
+    add_book(db, "One", edition="7th")
+    with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
+        add_book(db, "Two", edition="  ")

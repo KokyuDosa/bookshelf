@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bookshelf</title>
+<meta name="description" content="Search the book collection by title, series, author or ISBN.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f3f5f4" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f1412" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+/* Phone first: a sticky search bar on top, results as a plain list, no web fonts to download. */
+:root {
+  --bg: #f3f5f4;
+  --surface: #ffffff;
+  --ink: #17201c;
+  --muted: #5a6761;
+  --rule: #d9e0dc;
+  --accent: #1c6a4e;
+  --miss: #a3342b;
+  --serif: ui-serif, "New York", "Iowan Old Style", Georgia, "Times New Roman", serif;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0f1412; --surface: #161d1a; --ink: #e3ebe6; --muted: #93a39b; --rule: #27312c;
+    --accent: #5ec79a; --miss: #f08b80; color-scheme: dark; }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }  /* rules below set display; hidden must still win */
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.45 var(--sans);
+  padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px);
+  z-index: 10; background: var(--bg); }
+.wrap { max-width: 720px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+header { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg);
+  border-bottom: 1px solid var(--rule); padding-block: 12px 10px; }
+.brand { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+h1 { font: 600 20px/1.2 var(--serif); margin: 0; letter-spacing: .01em; }
+#count { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+form { margin: 0; }
+label.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+input[type="search"] { width: 100%; font: 17px/1.2 var(--sans); color: var(--ink); background: var(--surface);
+  border: 1.5px solid var(--rule); border-radius: 10px; padding: 12px 14px; outline: none; }
+input[type="search"]:focus { border-color: var(--accent); }
+#tags { display: flex; gap: 6px; overflow-x: auto; padding-top: 10px; scrollbar-width: none; }
+#tags::-webkit-scrollbar { display: none; }
+.chip { flex: none; font: 500 13px/1 var(--sans); padding: 7px 11px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--rule); background: var(--surface); color: var(--muted); }
+.chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+
+main { padding-block: 14px 28px; }
+.status { display: grid; gap: 2px; margin-bottom: 10px; font-size: 14px; color: var(--muted); }
+.status strong { font: 600 19px/1.25 var(--serif); }
+.status.hit, .status.miss { padding: 12px 14px; border-radius: 10px; background: var(--surface);
+  border: 1.5px solid currentColor; }
+.status.hit { color: var(--accent); }
+.status.miss { color: var(--miss); }
+.status.hit span, .status.miss span { color: var(--muted); }
+
+#results { list-style: none; margin: 0; padding: 0; }
+.book { display: flex; gap: 12px; padding-block: 12px; border-bottom: 1px solid var(--rule); }
+.cover { width: 46px; height: 68px; object-fit: cover; border-radius: 3px; flex: none; background: var(--rule); }
+.body { min-width: 0; }
+.title { font: 600 17px/1.3 var(--serif); margin: 0; overflow-wrap: anywhere; }
+.series { margin: 2px 0 0; font-size: 14px; font-weight: 500; color: var(--accent); }
+.authors { margin: 2px 0 0; font-size: 14px; color: var(--ink); }
+.meta { margin: 3px 0 0; font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.copies { font-weight: 600; color: var(--ink); border: 1px solid var(--rule); border-radius: 4px; padding: 1px 6px; }
+#more { display: block; margin: 16px auto 0; font: 500 15px var(--sans); color: var(--accent); background: none;
+  border: 1.5px solid var(--rule); border-radius: 10px; padding: 10px 18px; cursor: pointer; }
+
+footer { border-top: 1px solid var(--rule); padding-block: 16px 28px; font-size: 13px; color: var(--muted);
+  display: flex; flex-wrap: wrap; gap: 6px 16px; }
+footer a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="brand"><h1>Bookshelf</h1><span id="count"></span></div>
+    <form role="search">
+      <label class="vh" for="q">Search by title, series, author or ISBN</label>
+      <input id="q" type="search" placeholder="Title, series, author or ISBN" autocomplete="off"
+        autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
+    </form>
+    <div id="tags" role="group" aria-label="Filter by tag" hidden></div>
+  </div>
+</header>
+<main class="wrap">
+  <div id="status" class="status" aria-live="polite">Loading the book list…</div>
+  <ul id="results"></ul>
+  <button id="more" type="button" hidden>Show more</button>
+</main>
+<footer class="wrap">
+  <span id="as-of"></span>
+  <a href="data/books.csv" download="bookshelf.csv">Download the list (CSV)</a>
+</footer>
+<script type="module" src="app.js"></script>
+</body>
+</html>

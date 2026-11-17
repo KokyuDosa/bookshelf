@@ -22,6 +22,12 @@
 --   13 raw source row kept as JSON on source_records
 --   14 updated_at maintained by trigger
 --   15 books_fts deferred to a later migration (M4)
+--
+-- From the MyStuff2 import review (2026-11-17), all yours:
+--   SQLite is the master copy; MyStuff2 is a one-way source
+--   books.edition holds the game or print edition ("7th", "2nd Revised")
+--   book_private.estimated_value_cents holds market value (MyStuff2 "price")
+--   conditions use your MyStuff2 vocabulary; formats gain box_set
 
 
 -- ---------------------------------------------------------------------------
@@ -41,6 +47,7 @@ INSERT INTO formats (format, label, sort_order) VALUES
     ('trade_paperback',  'Trade paperback',       20),
     ('mass_market',      'Mass-market paperback', 30),
     ('paperback',        'Paperback (other)',     40),
+    ('box_set',          'Box set',               45),
     ('ebook',            'E-book',                50),
     ('audiobook',        'Audiobook',             60),
     ('other',            'Other',                 90);
@@ -52,12 +59,13 @@ CREATE TABLE conditions (
 ) STRICT, WITHOUT ROWID;
 
 INSERT INTO conditions (condition, label, sort_order) VALUES
-    ('new',        'New',        10),
-    ('fine',       'Fine',       20),
-    ('very_good',  'Very good',  30),
-    ('good',       'Good',       40),
-    ('fair',       'Fair',       50),
-    ('poor',       'Poor',       60);
+    ('mint',       'Mint',       10),
+    ('like_new',   'Like new',   20),
+    ('excellent',  'Excellent',  30),
+    ('very_good',  'Very good',  40),
+    ('good',       'Good',       50),
+    ('fair',       'Fair',       60),
+    ('poor',       'Poor',       70);
 
 
 -- ---------------------------------------------------------------------------
@@ -91,6 +99,7 @@ CREATE TABLE books (
                     ),                            -- check digit validated in Python
     publisher       TEXT,
     pub_year        INTEGER CHECK (pub_year IS NULL OR pub_year BETWEEN 1400 AND 2100),
+    edition         TEXT CHECK (edition IS NULL OR length(trim(edition)) > 0),       -- "7th", "2nd Revised"
     pages           INTEGER CHECK (pages IS NULL OR pages > 0),
     format          TEXT REFERENCES formats (format),
     language        TEXT CHECK (language IS NULL
@@ -179,6 +188,7 @@ CREATE INDEX book_tags_tag ON book_tags (tag_id);
 CREATE TABLE book_private (
     book_id               INTEGER PRIMARY KEY REFERENCES books (book_id) ON DELETE CASCADE,
     purchase_price_cents  INTEGER CHECK (purchase_price_cents IS NULL OR purchase_price_cents >= 0),
+    estimated_value_cents INTEGER CHECK (estimated_value_cents IS NULL OR estimated_value_cents >= 0),
     notes                 TEXT,
     loaned_to             TEXT,
     loaned_on             TEXT CHECK (loaned_on IS NULL OR date(loaned_on) IS loaned_on),

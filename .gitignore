@@ -8,11 +8,10 @@ __pycache__/
 build/
 dist/
 
-# Private data: never commit
-data/
+# Private data: never commit. The leading slash matters: plain "data/" would also
+# ignore site/data, which holds the website's public book list.
+/data/
 *.db
 *.db-journal
 *.db-wal
 *.db-shm
-# Only if you choose M5 Option B:
-# !site/data/public.db
