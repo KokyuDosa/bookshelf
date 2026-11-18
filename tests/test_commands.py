@@ -99,7 +99,7 @@ def test_add_manga_volume_by_hand(db_path, capsys):
         ).fetchone()
         tag = conn.execute("SELECT name FROM tags").fetchone()[0]
     assert tuple(row) == (12.0, "Omnibus", "One Piece", 999) and tag == "Manga"
-    assert "One Piece, vol. 12" in capsys.readouterr().out
+    assert "One Piece  —  vol. 12  —" in capsys.readouterr().out  # series = title: just the volume
 
 
 def test_open_library_down_still_adds_with_title(db_path, ol_answers, capsys):

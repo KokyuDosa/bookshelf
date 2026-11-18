@@ -52,7 +52,12 @@ def describe(book: dict) -> str:
     parts = [title]
     if book.get("series"):
         vol = book.get("volume")
-        parts.append(f"{book['series']}, vol. {vol}" if vol is not None else book["series"])
+        vol = f"{vol:g}" if isinstance(vol, float) else vol  # 12.0 -> 12, 2.5 stays
+        same = normalize_text(book["series"]) == normalize_text(book["title"])  # manga: "Happiness"
+        if vol is None:
+            parts.append(book["series"])
+        else:
+            parts.append(f"vol. {vol}" if same else f"{book['series']}, vol. {vol}")
     if book.get("authors"):
         parts.append(", ".join(book["authors"]))
     extra = [str(x) for x in (book.get("edition"), book.get("format"), book.get("year")) if x]

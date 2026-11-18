@@ -42,6 +42,31 @@ FORMAT_CODES = {
 }
 
 
+# Fields most categories don't have. A file without their column is normal, not a warning.
+OPTIONAL_FIELDS = frozenset({"series", "volume"})
+
+# "3", "03", "2.5", "Vol. 3", "Volume 3", "v3", "#3", "No. 3"
+VOLUME = re.compile(r"(?:vol(?:ume)?\.?|v\.?|#|no\.?)?\s*0*(\d+(?:\.\d+)?)", re.IGNORECASE)
+
+
+def parse_volume(raw: str) -> float | None:
+    """A single volume number, or None for anything else (a range such as "1-3")."""
+    hit = VOLUME.fullmatch(raw.strip())
+    return float(hit.group(1)) if hit else None
+
+
+def strip_volume(title: str, volume: float) -> str:
+    """ "Happiness, Vol. 3" -> "Happiness" when the volume column also says 3."""
+    number = re.escape(f"{volume:g}")
+    trimmed = re.sub(
+        rf"[\s,:\-\u2013]*(?:vol(?:ume)?\.?|v\.?|#|no\.?)?\s*0*{number}\s*$",
+        "",
+        title,
+        flags=re.IGNORECASE,
+    )
+    return trimmed if normalize_text(trimmed) else title
+
+
 class RowRejected(Exception):
     """The row can't become a book at all. The message goes into rejects.csv."""
 
@@ -170,6 +195,18 @@ def map_row(raw: dict[str, str], m: Mapping) -> MappedRow:
 
     book.credits = [Credit(name) for name in multi("authors") if normalize_text(name)]
     book.tags = [t for t in multi("tags") if normalize_text(t)]
+
+    if series := cell("series"):
+        book.series = series  # a series column wins over a "Series; Title" title
+    if volume := cell("volume"):
+        number = parse_volume(volume)
+        if number is None:
+            flags.append(("bad_value", f"volume {volume!r} is not a single number"))
+        else:
+            book.series_index = number
+            book.title = strip_volume(book.title, number)
+            if not book.series:
+                book.series = book.title  # manga: "Happiness" vol. 3 is in the series "Happiness"
 
     if publisher := cell("publisher"):
         book.publisher = m.publisher_aliases.get(normalize_text(publisher), publisher)

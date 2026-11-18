@@ -48,6 +48,7 @@ Dropped columns (kept in `source_records.raw_json`): item container, bundles, im
 | W5 | Deploy | GitHub Actions runs ruff and pytest (including a privacy check on the published JSON), then deploys `site/`. A failing test keeps the old site live. |
 | W6 | Manga and omnibuses | Series name + `series_index` for the volume (`--volume`); "Omnibus" goes in `edition`. No schema change needed. |
 | W7 | Open Library | `jscmd=data` endpoint; responses cached in `api_cache` (migration 002); 1 request a second, 3 with `BOOKSHELF_CONTACT`; enrichment fills empty fields only and never subtitles. |
+| W8 | Numbered volumes (2026-11-18) | Mappings can fill `series` and `volume`. A volume with no series makes the title the series; a title repeating its volume is trimmed. The volume is part of the natural key (no false duplicate flags between volumes) and of the search key (`happiness 7`). The website and terminal show just "Vol. N" when series and title are the same. `bookshelf rekey` updates existing keys. |
 
 ## Consequences to remember
 

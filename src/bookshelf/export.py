@@ -42,10 +42,14 @@ WHERE b.is_public = 1 OR :include_hidden
 """
 
 
-def search_key(title: str, subtitle: str | None, series: str | None, authors: list[str]) -> str:
-    """The text a search matches against: normalised title, subtitle, series and authors.
+def search_key(
+    title: str, subtitle: str | None, series: str | None, volume: float | None, authors: list[str]
+) -> str:
+    """The text a search matches against: normalised title, subtitle, series, "vol N" and authors,
+    so "happiness 7" and "happiness vol 7" both find volume 7.
     The website's search.js normalises typed text the same way (tests/fixtures holds the cases)."""
-    return normalize_text(" ".join(p for p in (title, subtitle, series, *authors) if p))
+    vol = f"vol {volume:g}" if volume is not None else None
+    return normalize_text(" ".join(p for p in (title, subtitle, series, vol, *authors) if p))
 
 
 def _volume(index: float | None) -> int | float | None:
@@ -103,7 +107,7 @@ def public_books(conn: sqlite3.Connection, include_hidden: bool = False) -> list
             "copies": copies,
             "tags": tags.get(book_id, []),
             "cover": cover,
-            "key": search_key(title, subtitle, series, authors),
+            "key": search_key(title, subtitle, series, index, authors),
         }
         books.append({k: v for k, v in book.items() if v not in (None, [])})
     assert all(set(b) <= set(PUBLIC_FIELDS) for b in books)

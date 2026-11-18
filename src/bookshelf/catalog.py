@@ -115,17 +115,26 @@ def _first_author_sort_name(credits: list[Credit]) -> str | None:
 
 
 def book_natural_key(
-    title: str, series: str | None, first_author_sort_name: str | None, pub_year: int | None
+    title: str,
+    series: str | None,
+    volume: float | None,
+    first_author_sort_name: str | None,
+    pub_year: int | None,
 ) -> str:
-    """The series name is part of a book's identity: "DND 3.5" + "Monster Manual" is not
-    "Pathfinder" + "Monster Manual", and many series reuse titles like "Core Rulebook"."""
-    full_title = f"{series} {title}" if series else title
+    """Series and volume are part of a book's identity: "DND 3.5" + "Monster Manual" is not
+    "Pathfinder" + "Monster Manual", and "Happiness" vol. 3 is not "Happiness" vol. 4."""
+    vol = f"vol {volume:g}" if volume is not None else None
+    full_title = " ".join(p for p in (series, vol, title) if p)
     return natural_key(full_title, first_author_sort_name, pub_year)
 
 
 def find_by_natural_key(conn: sqlite3.Connection, book: NewBook) -> list[int]:
     key = book_natural_key(
-        book.title, book.series, _first_author_sort_name(book.credits), book.pub_year
+        book.title,
+        book.series,
+        book.series_index,
+        _first_author_sort_name(book.credits),
+        book.pub_year,
     )
     return [r[0] for r in conn.execute("SELECT book_id FROM books WHERE natural_key = ?", (key,))]
 
@@ -149,8 +158,8 @@ def _add_tags(conn: sqlite3.Connection, book_id: int, tags: list[str]) -> None:
 
 def refresh_keys(conn: sqlite3.Connection, book_id: int) -> None:
     """Recompute sort_title, title_key and natural_key from the row as it stands now."""
-    title, series, year = conn.execute(
-        "SELECT b.title, s.name, b.pub_year FROM books b "
+    title, series, volume, year = conn.execute(
+        "SELECT b.title, s.name, b.series_index, b.pub_year FROM books b "
         "LEFT JOIN series s USING (series_id) WHERE b.book_id = ?",
         (book_id,),
     ).fetchone()
@@ -164,10 +173,27 @@ def refresh_keys(conn: sqlite3.Connection, book_id: int) -> None:
         (
             sort_title(title),
             title_key(title),
-            book_natural_key(title, series, first[0] if first else None, year),
+            book_natural_key(title, series, volume, first[0] if first else None, year),
             book_id,
         ),
     )
+
+
+def rekey_all(conn: sqlite3.Connection) -> int:
+    """Recompute every book's keys after the rules change. Returns how many changed."""
+    before = dict(
+        conn.execute(
+            "SELECT book_id, natural_key || '/' || sort_title || '/' || title_key FROM books"
+        )
+    )
+    for book_id in before:
+        refresh_keys(conn, book_id)
+    after = dict(
+        conn.execute(
+            "SELECT book_id, natural_key || '/' || sort_title || '/' || title_key FROM books"
+        )
+    )
+    return sum(before[k] != after[k] for k in before)
 
 
 def add_book(conn: sqlite3.Connection, book: NewBook) -> int:

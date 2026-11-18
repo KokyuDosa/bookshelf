@@ -133,7 +133,7 @@ def test_series_volume_and_clearing_series(lib, capsys):
     d = show_json(lib, "1", capsys)
     assert (d["series"], d["volume"]) == ("Middle-earth", 0.5)
     assert (
-        d["keys"]["natural_key"] == "middle earth the hobbit|tolkien j r r|1937"
+        d["keys"]["natural_key"] == "middle earth vol 0 5 the hobbit|tolkien j r r|1937"
     )  # series + title
     run(lib, "edit", "1", "--clear", "series")
     d = show_json(lib, "1", capsys)

@@ -19,7 +19,13 @@ from pathlib import Path
 
 from bookshelf import migrations
 from bookshelf.catalog import add_book, find_by_natural_key, update_book
-from bookshelf.importers.mapping import MappedRow, Mapping, RowRejected, map_row
+from bookshelf.importers.mapping import (
+    OPTIONAL_FIELDS,
+    MappedRow,
+    Mapping,
+    RowRejected,
+    map_row,
+)
 
 TEXT_SUFFIXES = {".csv": ",", ".tsv": "\t"}
 
@@ -50,6 +56,7 @@ class Report:
     flags: list[Flagged] = field(default_factory=list)
     rejects: list[dict[str, str]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
     rejects_file: Path | None = None
     backup_file: Path | None = None
 
@@ -69,9 +76,13 @@ def _read_text(
     for required in (m.key_column, m.fields["title"]):
         if required not in header:
             raise ValueError(f"{name}: no {required!r} column; is this a {m.source} export?")
-    missing = [c for c in m.fields.values() if c not in header]
+    missing = [c for f, c in m.fields.items() if c not in header and f not in OPTIONAL_FIELDS]
     if missing:
         report.warnings.append(f"{name}: no column(s) {missing}; those fields stay empty")
+    absent = [c for f, c in m.fields.items() if c not in header and f in OPTIONAL_FIELDS]
+    if absent:
+        names = " or ".join(repr(c) for c in absent)
+        report.notes.append(f"{name}: no {names} column (fine if this category has none)")
     for row in reader:
         if any((v or "").strip() for v in row.values()):  # skip blank lines
             yield RawRow(name, reader.line_num, {k: v or "" for k, v in row.items() if k})
@@ -294,6 +305,7 @@ def format_report(r: Report) -> str:
         ),
     ]
     lines += [f"  warning: {w}" for w in r.warnings]
+    lines += [f"  note: {n}" for n in r.notes]
     if r.flags:
         lines.append("  New review flags:")
         lines += [f"    {f.title[:48]:48}  {f.reason}: {f.details}" for f in r.flags]

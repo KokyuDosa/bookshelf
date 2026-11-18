@@ -17,6 +17,10 @@ edition = "edition"
 condition = "quality"
 estimated_value = "price"       # market value, stored privately
 isbn = "item barcode"
+volume = "volume"               # manga and other numbered volumes; use your column's exact name
+# series = "series"             # only if a category has its own series column
+# A volume without a series puts the book in a series named after its title, so "Happiness"
+# with volume 3 becomes vol. 3 of the series "Happiness". Categories without these columns are fine.
 # Not mapped (kept in the stored raw row): item container, item bundles, item images,
 # item attachments, item colors, item created, item updated.
 

@@ -9,7 +9,7 @@ from contextlib import closing
 from pathlib import Path
 
 from bookshelf import migrations
-from bookshelf.catalog import Credit, NewBook, add_book, find_by_natural_key
+from bookshelf.catalog import Credit, NewBook, add_book, find_by_natural_key, rekey_all
 from bookshelf.db import connect
 from bookshelf.editing import (
     CLEARABLE,
@@ -365,6 +365,19 @@ def cmd_enrich(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_rekey(args: argparse.Namespace) -> int:
+    conn = open_db(args.db)
+    if conn is None:
+        return 1
+    with closing(conn), conn:
+        total = conn.execute("SELECT count(*) FROM books").fetchone()[0]
+        changed = rekey_all(conn)
+    print(f"Recomputed the keys of {total} books; {changed} changed.")
+    if changed:
+        print("Run 'bookshelf publish' so the website's search picks up the change.")
+    return 0
+
+
 def cmd_export(args: argparse.Namespace) -> int:
     conn = open_db(args.db)
     if conn is None:
@@ -500,6 +513,9 @@ def register(sub: argparse._SubParsersAction) -> None:
     )
     p.add_argument("--limit", type=int, help="stop after this many books")
     p.set_defaults(func=cmd_enrich)
+
+    p = sub.add_parser("rekey", help="recompute every book's matching keys after the rules change")
+    p.set_defaults(func=cmd_rekey)
 
     p = sub.add_parser("export", help="write the website's data files without publishing")
     p.add_argument("--out", type=Path, default=SITE_DATA, help=f"(default: {SITE_DATA})")

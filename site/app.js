@@ -1,4 +1,4 @@
-import { compareBooks, prepare, search } from "./search.js";
+import { compareBooks, normalizeText, prepare, search } from "./search.js";
 
 const PAGE_SIZE = 60;
 const $ = sel => document.querySelector(sel);
@@ -37,7 +37,12 @@ function bookItem(b) {
   }
   const body = el("div", "body");
   body.append(el("h3", "title", b.subtitle ? `${b.title}: ${b.subtitle}` : b.title));
-  if (b.series) body.append(el("p", "series", b.volume != null ? `${b.series} · Vol. ${b.volume}` : b.series));
+  if (b.series) {
+    // Manga often has series and title the same ("Happiness"): then show just the volume.
+    const same = normalizeText(b.series) === normalizeText(b.title);
+    const text = b.volume == null ? b.series : same ? `Vol. ${b.volume}` : `${b.series} · Vol. ${b.volume}`;
+    body.append(el("p", "series", text));
+  }
   if (b.authors) body.append(el("p", "authors", b.authors.join(", ")));
   const meta = [b.edition && editionLabel(b.edition), b.format, b.year].filter(Boolean);
   if (meta.length || b.copies > 1) {

@@ -20,6 +20,8 @@ const books = prepare([
   { id: 4, title: "One Piece", series: "One Piece", volume: 2, key: "one piece one piece" },
   { id: 5, title: "One Piece", series: "One Piece", volume: 10, key: "one piece one piece" },
   { id: 6, title: "Anathem", authors: ["Neal Stephenson"], key: "anathem neal stephenson" },
+  { id: 7, title: "Happiness", series: "Happiness", volume: 1, key: "happiness happiness vol 1 shuzo oshimi" },
+  { id: 8, title: "Happiness", series: "Happiness", volume: 7, key: "happiness happiness vol 7 shuzo oshimi" },
 ]);
 const ids = r => r.results.map(b => b.id);
 check("prefix words", ids(search(books, "hob tolk")), [1]);
@@ -31,7 +33,10 @@ check("isbn-10 finds isbn-13", ids(search(books, "0-306-40615-2")), [1]);
 check("isbn not owned", search(books, "978-0-306-40615-7 ").mode, "isbn");
 check("bad check digit", search(books, "0-306-40615-3").mode, "bad-isbn");
 check("blank", search(books, "  ").mode, "empty");
-check("browse order", [...books].sort(compareBooks).map(b => b.id), [6, 2, 3, 1, 4, 5]);
+check("browse order", [...books].sort(compareBooks).map(b => b.id), [6, 2, 3, 7, 8, 1, 4, 5]);
+check("volume number", ids(search(books, "happiness 7")), [8]);
+check("vol word", ids(search(books, "happiness vol 7")), [8]);
+check("whole series", ids(search(books, "happiness")), [7, 8]);
 
 if (failures.length) {
   console.error(failures.slice(0, 20).join("\n"));
