@@ -28,6 +28,7 @@ PUBLIC_FIELDS = (
     "isbn",
     "copies",
     "tags",
+    "contents",
     "cover",
     "key",
 )
@@ -51,13 +52,15 @@ def search_key(
     series: str | None,
     volume: float | None,
     authors: list[str],
+    contents: list[str] = (),
 ) -> str:
-    """The text a search matches against: normalised title, subtitle, line, series, "vol N" and
-    authors,
-    so "happiness 7" and "happiness vol 7" both find volume 7.
+    """The text a search matches against: normalised title, subtitle, line, series, "vol N",
+    authors and a set's contents, so "happiness 7" and "happiness vol 7" both find volume 7,
+    and "deities of the mythos" finds the Malleus Monstrorum set.
     The website's search.js normalises typed text the same way (tests/fixtures holds the cases)."""
     vol = f"vol {volume:g}" if volume is not None else None
-    return normalize_text(" ".join(p for p in (title, subtitle, line, series, vol, *authors) if p))
+    words = (title, subtitle, line, series, vol, *authors, *contents)
+    return normalize_text(" ".join(p for p in words if p))
 
 
 def _volume(index: float | None) -> int | float | None:
@@ -80,6 +83,12 @@ def public_books(conn: sqlite3.Connection, include_hidden: bool = False) -> list
         "SELECT bt.book_id, t.name FROM book_tags bt JOIN tags t USING (tag_id) ORDER BY t.name_key"
     ):
         tags.setdefault(book_id, []).append(name)
+    # what a set contains, but not which pieces are missing: that stays private
+    contents: dict[int, list[str]] = {}
+    for book_id, label in conn.execute(
+        "SELECT book_id, label FROM book_parts ORDER BY book_id, position"
+    ):
+        contents.setdefault(book_id, []).append(label)
 
     books = []
     for row in conn.execute(BOOKS_SQL + " ORDER BY b.book_id", {"include_hidden": include_hidden}):
@@ -116,8 +125,11 @@ def public_books(conn: sqlite3.Connection, include_hidden: bool = False) -> list
             "isbn": isbn,
             "copies": copies,
             "tags": tags.get(book_id, []),
+            "contents": contents.get(book_id, []),
             "cover": cover,
-            "key": search_key(title, subtitle, line, series, index, authors),
+            "key": search_key(
+                title, subtitle, line, series, index, authors, contents.get(book_id, [])
+            ),
         }
         books.append({k: v for k, v in book.items() if v not in (None, [])})
     assert all(set(b) <= set(PUBLIC_FIELDS) for b in books)
@@ -159,6 +171,7 @@ def books_csv(conn: sqlite3.Connection) -> str:
             "ISBN",
             "Copies",
             "Tags",
+            "Contents",
         ]
     )
     rows = public_books(conn)
@@ -186,6 +199,7 @@ def books_csv(conn: sqlite3.Connection) -> str:
                 b.get("isbn", ""),
                 b["copies"],
                 "; ".join(b.get("tags", [])),
+                "; ".join(b.get("contents", [])),
             ]
         )
     return out.getvalue()

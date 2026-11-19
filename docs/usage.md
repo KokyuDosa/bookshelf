@@ -29,6 +29,7 @@ bookshelf publish
 | Add a book with no ISBN | `bookshelf add --title "The Time Machine" --author "H. G. Wells" --year 1895` |
 | Add a translation or anthology | `--author`, `--translator`, `--editor`, `--illustrator`, in credit order |
 | See or fix one book | `bookshelf show 56`, `bookshelf edit 56 --clear isbn` (see below) |
+| Add a slipcase or boxed set | `bookshelf add 9781568823348 --format "box set" --part "Vol. 1" --part "Vol. 2" --part Slipcase` (see below) |
 | Change many books at once | `bookshelf edit-many --title-has "call of cthulhu" --line "Call of Cthulhu"` (see below) |
 | Count a second copy | `bookshelf add 9780786928866 --another-copy` |
 | Keep a book off the website | add `--hidden` |
@@ -170,7 +171,8 @@ not `#56`: a `#` starts a comment there.
 | Cut a prefix off the title | `bookshelf edit 56 --trim-title "Call of Cthulhu:"` |
 | Tags | `bookshelf edit 56 --add-tag Classics --remove-tag TTRPG` |
 | Private details | `--value 120`, `--price 45`, `--notes "Signed"`, `--loaned-to Sam --loaned-on 2026-11-01` |
-| Empty any field | `--clear FIELD` (repeatable): isbn, line, series, volume, authors, tags, value, loan, … |
+| What's in a set | `--add-part "Vol. 1"`, `--missing-part 3`, `--found-part 3`, `--remove-part 3` (see below) |
+| Empty any field | `--clear FIELD` (repeatable): isbn, line, series, volume, authors, tags, parts, value, loan, … |
 | Gave it away or sold it | `bookshelf edit 56 --remove` (today) or `--remove 2026-11-17` |
 | Changed your mind | `bookshelf edit 56 --restore` |
 
@@ -187,6 +189,33 @@ A **product line** groups books that belong together without an order: "DND 3.5"
 "Happiness" vol. 7. A book can have both (a Pathfinder adventure path is in the line
 "Pathfinder" and a series). Keep the edition in the line's name ("DND 3.5", not "DND" plus an
 edition), because the website groups and sorts by the name.
+
+### Slipcase and boxed sets
+
+A set with one ISBN is one book: that's what you scan, buy, sell and value. List what's inside
+it as **parts**, in order:
+
+```powershell
+bookshelf edit 9781568823348 --title "Malleus Monstrorum" --format "box set" `
+    --add-part "Vol. 1: Monsters of the Mythos" --add-part "Vol. 2: Deities of the Mythos" `
+    --add-part Slipcase
+```
+
+(The backtick at the end of a line continues a PowerShell command on the next line.)
+
+- **Kinds:** each part has a kind (volume, booklet, handouts, map, screen, cards, dice,
+  slipcase, other), guessed from its name: "Vol. 2" is a volume, "Keeper Screen" a screen. To
+  choose it yourself, put it first with a colon: `--add-part "handouts: Keeper's materials"`.
+- **Numbers:** `bookshelf show` lists the parts numbered 1, 2, 3…; the other options use those
+  numbers. Removing a part renumbers the ones after it.
+- **Missing pieces:** `--missing-part 4` marks part 4 as gone, `--found-part 4` undoes it. Only
+  you see this (in `show`); the website lists what the set contains, not what you're missing.
+- **Searching** matches part names too, so "deities of the mythos" finds the set, here and on
+  the website.
+- `bookshelf add` takes `--part` (repeatable) for a new set. `edit-many` can't change parts,
+  because they belong to one book.
+- Two books bought separately, each with its own ISBN, are not a set: give them a series and
+  volume numbers instead.
 
 ## Changing many books at once
 
@@ -244,7 +273,7 @@ so scripts can use it.
 
 ## What the website shows
 
-Title, subtitle, product line, series and volume, authors, edition, format, publisher, year, ISBN, number of
+Title, subtitle, product line, series and volume, a set's contents, authors, edition, format, publisher, year, ISBN, number of
 copies, tags and the Open Library cover. Never: values, prices, notes, loans, shelf, condition,
 books added with `--hidden`, or books you've removed. Friends can download the same list as a
 CSV from the bottom of the page, and you can share a search as a link: `…/bookshelf/?q=shadowrun`.

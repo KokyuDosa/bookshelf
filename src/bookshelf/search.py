@@ -75,4 +75,6 @@ def describe(book: dict) -> str:
         extra.append(f"{book['copies']} copies")
     if extra:
         parts.append(" · ".join(extra))
+    if book.get("contents"):
+        parts.append("contains " + " + ".join(book["contents"]))
     return "  —  ".join(parts)

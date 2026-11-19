@@ -42,7 +42,7 @@ Dropped columns (kept in `source_records.raw_json`): item container, bundles, im
 | # | Decision | Choice |
 | --- | --- | --- |
 | W1 | Export format | Option A: `site/data/books.json` searched by plain JavaScript; no sql.js. Plus `books.csv` for friends. |
-| W2 | Public fields | title, subtitle, line (W9), series, volume, authors, edition, format, publisher, year, ISBN, copies, tags, cover. Condition and shelf stay private along with everything in `book_private`. |
+| W2 | Public fields | title, subtitle, line (W9), series, volume, authors, edition, format, publisher, year, ISBN, copies, tags, set contents (W12), cover. Condition, shelf and missing set pieces stay private along with everything in `book_private`. |
 | W3 | Search rules | Every typed word must start a word of the title, subtitle, series or authors; ISBN-shaped input is an exact lookup. `search.js` and `search.py` follow the same rules, and a test checks JavaScript normalisation against Python on thousands of strings. |
 | W4 | Deterministic export | `as_of` is the latest `updated_at`, not the export time, so an unchanged database exports identical files and `publish` has nothing to commit. |
 | W5 | Deploy | GitHub Actions runs ruff and pytest (including a privacy check on the published JSON), then deploys `site/`. A failing test keeps the old site live. |
@@ -52,6 +52,7 @@ Dropped columns (kept in `source_records.raw_json`): item container, bundles, im
 | W9 | Product lines (2026-11-18) | A separate `product_lines` table and `books.line_id` (migration 003), apart from numbered series; a book can have both. Migration 003 moved every series with no numbered volume into a line. Line names keep the edition ("DND 3.5"). The importer fills the line from `Line; Title` or a `line` column. The line is part of the natural key, the search key, the website (shown above the title, books grouped by line) and the CSV. |
 | W10 | Re-import change detection (2026-11-18) | `source_records.row_hash` fingerprints the export row's cells after corrections (prefix `cells-v1:`), not the mapped values, so a mapping-rule change never overwrites edits. Rows hashed the old way are compared by their stored `raw_json` and upgraded on the next import. `import --remap` re-applies the mapping on purpose. |
 | W11 | Batch edits (2026-11-18) | `edit-many`: filters combine with AND, at least one is required (`--all` to mean everything), removed books are skipped unless asked. One transaction: every change is listed, confirmed once, and a refusal on any book saves nothing. Single-book values (title, ISBN, volume, cover, Open Library key) can't be batch-set; abbreviations are off. |
+| W12 | Sets and slipcases (2026-11-18) | A set with one ISBN stays one book, with its pieces listed in `book_parts` (migration 004): position, kind (lookup table `part_kinds`), label and a private `have` flag. Pieces have no ISBN, because the sets in hand carry only the set's; adding a nullable column later is a small migration. Part labels are public (`contents`) and searchable; `have` is never exported. Not chosen: a row per volume (double-counts copies, can't share the set's unique ISBN) or contents in the title. |
 
 ## Consequences to remember
 

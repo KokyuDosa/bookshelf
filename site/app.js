@@ -51,6 +51,7 @@ function bookItem(b) {
     if (b.copies > 1) line.append(el("span", "copies", `${b.copies} copies`));
     body.append(line);
   }
+  if (b.contents) body.append(el("p", "contents", `Contains ${b.contents.join(" · ")}`));
   li.append(body);
   return li;
 }

@@ -1,5 +1,6 @@
 """Writing books with all their computed keys. Used by the seed, the importer, and later `add`."""
 
+import re
 import sqlite3
 from dataclasses import dataclass, field
 from typing import Literal
@@ -19,6 +20,59 @@ from bookshelf.normalize import (
 class Credit:
     name: str  # as written: "Ursula K. Le Guin" or "Le Guin, Ursula K."
     role: str = "author"
+
+
+@dataclass
+class Part:
+    """One piece of a set: a volume, the slipcase, a folder of handouts."""
+
+    label: str
+    kind: str = "other"  # a part_kinds code
+    have: bool = True
+
+
+# words that name a kind, as typed: "handouts: Keeper's folder" or guessed from "Vol. 2"
+KIND_WORDS = {
+    "volume": "volume",
+    "volumes": "volume",
+    "vol": "volume",
+    "book": "volume",
+    "booklet": "booklet",
+    "booklets": "booklet",
+    "handout": "handouts",
+    "handouts": "handouts",
+    "map": "map",
+    "maps": "map",
+    "screen": "screen",
+    "card": "cards",
+    "cards": "cards",
+    "deck": "cards",
+    "dice": "dice",
+    "slipcase": "slipcase",
+    "case": "slipcase",
+    "box": "slipcase",
+    "other": "other",
+}
+
+
+def parse_part(text: str) -> Part:
+    """ "Vol. 1: Monsters of the Mythos" -> a volume; "Slipcase" -> a slipcase;
+    "handouts: Keeper's materials" -> handouts labelled "Keeper's materials".
+
+    A known kind word before a colon sets the kind; otherwise the kind is guessed from the
+    label's words (the first kind word wins), and is "other" when none fits.
+    """
+    label = " ".join(text.split())
+    if not normalize_text(label):
+        raise ValueError(f"a part needs a name, not {text!r}")
+    head, sep, rest = label.partition(":")
+    if sep and normalize_text(head) in KIND_WORDS and normalize_text(rest):
+        return Part(rest.strip(), KIND_WORDS[normalize_text(head)])
+    words = normalize_text(label).replace("slip case", "slipcase").split()
+    kind = next((KIND_WORDS[w] for w in words if w in KIND_WORDS), None)
+    if kind is None and re.match(r"(?i)v\.?\s*\d", label):  # "v1", "v. 2"
+        kind = "volume"
+    return Part(label, kind or "other")
 
 
 @dataclass
@@ -44,6 +98,7 @@ class NewBook:
     cover_url: str | None = None
     is_public: bool = True
     tags: list[str] = field(default_factory=list)
+    parts: list[Part] = field(default_factory=list)  # a set's contents, in order
     # private, stored in book_private
     purchase_price_cents: int | None = None
     estimated_value_cents: int | None = None
@@ -170,6 +225,28 @@ def _add_tags(conn: sqlite3.Connection, book_id: int, tags: list[str]) -> None:
         )
 
 
+def write_parts(conn: sqlite3.Connection, book_id: int, parts: list[Part]) -> None:
+    """Replace a book's parts with `parts`, numbered 1, 2, 3… in the order given."""
+    conn.execute("DELETE FROM book_parts WHERE book_id = ?", (book_id,))
+    conn.executemany(
+        "INSERT INTO book_parts (book_id, position, kind, label, have) VALUES (?, ?, ?, ?, ?)",
+        [
+            (book_id, n, p.kind, " ".join(p.label.split()), int(p.have))
+            for n, p in enumerate(parts, start=1)
+        ],
+    )
+
+
+def read_parts(conn: sqlite3.Connection, book_id: int) -> list[Part]:
+    return [
+        Part(label, kind, bool(have))
+        for kind, label, have in conn.execute(
+            "SELECT kind, label, have FROM book_parts WHERE book_id = ? ORDER BY position",
+            (book_id,),
+        )
+    ]
+
+
 def refresh_keys(conn: sqlite3.Connection, book_id: int) -> None:
     """Recompute sort_title, title_key and natural_key from the row as it stands now."""
     title, line, series, volume, year = conn.execute(
@@ -236,6 +313,8 @@ def add_book(conn: sqlite3.Connection, book: NewBook) -> int:
     ).fetchone()[0]
     _add_credits(conn, book_id, book.credits)
     _add_tags(conn, book_id, book.tags)
+    if book.parts:
+        write_parts(conn, book_id, book.parts)
     _write_private(conn, book_id, book, "overwrite")
     refresh_keys(conn, book_id)
     return book_id
@@ -297,5 +376,7 @@ def update_book(
         conn.execute("DELETE FROM book_authors WHERE book_id = ?", (book_id,))
         _add_credits(conn, book_id, book.credits)
     _add_tags(conn, book_id, book.tags)
+    if book.parts and (mode == "overwrite" or not read_parts(conn, book_id)):
+        write_parts(conn, book_id, book.parts)
     _write_private(conn, book_id, book, mode)
     refresh_keys(conn, book_id)

@@ -7,11 +7,14 @@ from dataclasses import dataclass, field
 
 from bookshelf.catalog import (
     Credit,
+    Part,
     _add_credits,
     _add_tags,
     get_or_create_line,
     get_or_create_series,
+    read_parts,
     refresh_keys,
+    write_parts,
 )
 from bookshelf.export import public_books
 from bookshelf.isbn import InvalidISBN, looks_like_isbn, to_isbn10, to_isbn13
@@ -78,6 +81,7 @@ def details(conn: sqlite3.Connection, book_id: int) -> dict:
         "WHERE book_id = ? OR candidate_book_id = ? ORDER BY flag_id",
         (book_id, book_id),
     ).fetchall()
+    parts = read_parts(conn, book_id)
     isbn10 = to_isbn10(b["isbn13"]) if b["isbn13"] else None
     return {
         "id": b["book_id"],
@@ -99,6 +103,7 @@ def details(conn: sqlite3.Connection, book_id: int) -> dict:
             for c in credits
         ],
         "tags": [t[0] for t in tags],
+        "parts": [{"kind": p.kind, "label": p.label, "have": p.have} for p in parts],
         "copies": b["copies"],
         "condition": b["condition"],
         "shelf": b["shelf"],
@@ -155,6 +160,8 @@ def flatten(d: dict) -> dict[str, str | None]:
         "language": d["language"],
         "credits": _credits_text(d["credits"]),
         "tags": ", ".join(d["tags"]) or None,
+        "contents": "; ".join(p["label"] + ("" if p["have"] else " (missing)") for p in d["parts"])
+        or None,
         "copies": str(d["copies"]),
         "condition": d["condition"],
         "shelf": d["shelf"],
@@ -208,6 +215,12 @@ def format_details(d: dict) -> str:
     for heading, keys in SECTIONS.items():
         lines.append(f"\n{heading}")
         lines += [f"  {k:<17}{flat[k] if flat[k] is not None else '-'}" for k in keys]
+        if heading == "Book" and d["parts"]:
+            lines.append("\nContents (numbers for --remove-part, --missing-part, --found-part)")
+            lines += [
+                f"  {n:<3}{p['kind']:<10}{p['label']}" + ("" if p["have"] else "   [missing]")
+                for n, p in enumerate(d["parts"], start=1)
+            ]
     lines.append("\nRecord")
     lines.append(f"  {'added':<17}{d['created_at']}")
     lines.append(f"  {'changed':<17}{d['updated_at']}")
@@ -258,7 +271,7 @@ PRIVATE_COLUMNS = {
 CLEARABLE = sorted(
     (set(BOOK_COLUMNS) - {"title", "copies"})
     | set(PRIVATE_COLUMNS)
-    | {"line", "series", "loan", "authors", "tags"}
+    | {"line", "series", "loan", "authors", "tags", "parts"}
 )
 
 
@@ -273,6 +286,11 @@ class Edit:
     credits: list[Credit] | None = None  # replaces all credits when given
     add_tags: list[str] = field(default_factory=list)
     remove_tags: list[str] = field(default_factory=list)
+    # a set's contents; numbers are the positions `show` lists before the edit
+    add_parts: list[Part] = field(default_factory=list)
+    remove_parts: list[int] = field(default_factory=list)
+    missing_parts: list[int] = field(default_factory=list)
+    found_parts: list[int] = field(default_factory=list)
     remove_on: str | None = None
     restore: bool = False
 
@@ -287,6 +305,10 @@ class Edit:
             or self.credits is not None
             or self.add_tags
             or self.remove_tags
+            or self.add_parts
+            or self.remove_parts
+            or self.missing_parts
+            or self.found_parts
             or self.remove_on
             or self.restore
         )
@@ -418,7 +440,32 @@ def apply_edit(conn: sqlite3.Connection, book_id: int, e: Edit) -> None:
             "(SELECT tag_id FROM tags WHERE name_key = ?)",
             (book_id, normalize_text(tag)),
         )
+    _edit_parts(conn, book_id, e)
     refresh_keys(conn, book_id)
+
+
+def _edit_parts(conn: sqlite3.Connection, book_id: int, e: Edit) -> None:
+    if not (
+        e.add_parts or e.remove_parts or e.missing_parts or e.found_parts or "parts" in e.clear
+    ):
+        return
+    parts = [] if "parts" in e.clear else read_parts(conn, book_id)
+    for label, numbers in (
+        ("--remove-part", e.remove_parts),
+        ("--missing-part", e.missing_parts),
+        ("--found-part", e.found_parts),
+    ):
+        for n in numbers:
+            if not 1 <= n <= len(parts):
+                listed = f"1 to {len(parts)}" if parts else "none yet"
+                raise ValueError(f"{label} {n}: this book's parts are numbered {listed}")
+    for n in e.missing_parts:
+        parts[n - 1].have = False
+    for n in e.found_parts:
+        parts[n - 1].have = True
+    gone = set(e.remove_parts)
+    parts = [p for n, p in enumerate(parts, start=1) if n not in gone]
+    write_parts(conn, book_id, parts + e.add_parts)
 
 
 def changes(before: dict[str, str | None], after: dict[str, str | None]) -> list[str]:

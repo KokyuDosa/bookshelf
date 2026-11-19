@@ -9,7 +9,14 @@ from contextlib import closing
 from pathlib import Path
 
 from bookshelf import migrations
-from bookshelf.catalog import Credit, NewBook, add_book, find_by_natural_key, rekey_all
+from bookshelf.catalog import (
+    Credit,
+    NewBook,
+    add_book,
+    find_by_natural_key,
+    parse_part,
+    rekey_all,
+)
 from bookshelf.db import connect
 from bookshelf.editing import (
     CLEARABLE,
@@ -150,6 +157,7 @@ def _add(conn: sqlite3.Connection, args: argparse.Namespace) -> int:
             shelf=args.shelf,
             is_public=not args.hidden,
             tags=args.tag or [],
+            parts=[parse_part(t) for t in args.part or []],
             estimated_value_cents=parse_money_cents(args.value) if args.value else None,
             cover_url=found.cover_url if found else None,
             ol_edition_key=found.ol_edition_key if found else None,
@@ -175,6 +183,7 @@ def _add(conn: sqlite3.Connection, args: argparse.Namespace) -> int:
         "format": book.format,
         "year": book.pub_year,
         "copies": book.copies,
+        "contents": [pt.label for pt in book.parts],
     }
     print(f"  {describe({k: v for k, v in preview.items() if v not in (None, [])})}")
     if isbn13:
@@ -279,6 +288,12 @@ def build_edit(conn: sqlite3.Connection, args: argparse.Namespace) -> Edit:
     for name in ("notes", "loaned_to", "loaned_on"):
         if getattr(args, name) is not None:
             e.set_private[name.replace("_", "-")] = getattr(args, name)
+    e.add_parts = [parse_part(t) for t in getattr(args, "add_part", None) or []]
+    e.remove_parts = getattr(args, "remove_part", None) or []
+    e.missing_parts = getattr(args, "missing_part", None) or []
+    e.found_parts = getattr(args, "found_part", None) or []
+    if set(e.missing_parts) & set(e.found_parts):
+        raise ValueError("a part can't be both --missing-part and --found-part")
     if args.remove and args.restore:
         raise ValueError("--remove and --restore can't be used together")
     return e
@@ -553,6 +568,22 @@ def add_change_options(p: argparse.ArgumentParser, many: bool) -> None:
     add_credit_options(g, "replace all credits with these people")
     g.add_argument("--add-tag", action="append", metavar="TAG")
     g.add_argument("--remove-tag", action="append", metavar="TAG")
+    if not many:
+        g.add_argument(
+            "--add-part",
+            action="append",
+            metavar="TEXT",
+            help="add a piece of a set, e.g. 'Vol. 1', 'Slipcase', 'handouts: Keeper folder'; "
+            "repeat for several",
+        )
+        for flag, what in (
+            ("--remove-part", "take part N off the list"),
+            ("--missing-part", "mark part N as missing (private)"),
+            ("--found-part", "mark part N as here again"),
+        ):
+            g.add_argument(
+                flag, action="append", type=int, metavar="N", help=f"{what}; numbers from 'show'"
+            )
     g.add_argument(
         "--clear",
         action="append",
@@ -592,6 +623,12 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--copies", type=int, default=1)
     p.add_argument("--shelf", help="where it lives; never published")
     p.add_argument("--tag", action="append", help="genre or label; repeat for several")
+    p.add_argument(
+        "--part",
+        action="append",
+        metavar="TEXT",
+        help="a piece of a set, e.g. 'Vol. 1', 'Slipcase'; repeat in order",
+    )
     p.add_argument("--value", help="estimated value, e.g. 45.00; private")
     p.add_argument("--hidden", action="store_true", help="keep this book off the website")
     p.add_argument(
