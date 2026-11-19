@@ -26,8 +26,8 @@ def _score(book: dict, tokens: list[str], phrase: str) -> int:
 
 
 def search(books: list[dict], query: str) -> Result:
-    """Every word of the query must start a word of the book's title, subtitle, series or
-    authors. Something shaped like an ISBN is looked up exactly instead."""
+    """Every word of the query must start a word of the book's title, subtitle, line, series
+    or authors. Something shaped like an ISBN is looked up exactly instead."""
     raw = query.strip()
     if not raw:
         return Result("empty")
@@ -42,7 +42,15 @@ def search(books: list[dict], query: str) -> Result:
     if not tokens:
         return Result("empty")
     scored = [(s, b) for b in books if (s := _score(b, tokens, phrase))]
-    scored.sort(key=lambda sb: (-sb[0], normalize_text(sb[1].get("series", "")), sb[1]["key"]))
+    scored.sort(
+        key=lambda sb: (
+            -sb[0],
+            normalize_text(sb[1].get("line", "")),
+            normalize_text(sb[1].get("series", "")),
+            sb[1].get("volume", 0),
+            sb[1]["key"],
+        )
+    )
     return Result("text", [b for _, b in scored])
 
 
@@ -50,6 +58,8 @@ def describe(book: dict) -> str:
     """One line per book for the terminal."""
     title = f"{book['title']}: {book['subtitle']}" if book.get("subtitle") else book["title"]
     parts = [title]
+    if book.get("line"):
+        parts.append(book["line"])
     if book.get("series"):
         vol = book.get("volume")
         vol = f"{vol:g}" if isinstance(vol, float) else vol  # 12.0 -> 12, 2.5 stays

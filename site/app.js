@@ -36,6 +36,7 @@ function bookItem(b) {
     li.append(img);
   }
   const body = el("div", "body");
+  if (b.line) body.append(el("p", "line", b.line)); // product line, e.g. "DND 3.5"
   body.append(el("h3", "title", b.subtitle ? `${b.title}: ${b.subtitle}` : b.title));
   if (b.series) {
     // Manga often has series and title the same ("Happiness"): then show just the volume.
@@ -87,7 +88,7 @@ function run() {
   const where = activeTag ? ` in ${activeTag}` : "";
 
   if (result.mode === "empty") {
-    setStatus("browse", null, activeTag ? `${plural(pool.length, "book")} tagged ${activeTag}` : `All ${plural(pool.length, "book")}, A to Z by series and title`);
+    setStatus("browse", null, activeTag ? `${plural(pool.length, "book")} tagged ${activeTag}` : `All ${plural(pool.length, "book")}, A to Z by line, series and title`);
     render([...pool].sort(compareBooks));
   } else if (result.mode === "bad-isbn") {
     setStatus("miss", "That isn’t a valid ISBN", "The check digit doesn’t match. Check the number and try again.");
@@ -95,7 +96,7 @@ function run() {
   } else if (!result.results.length) {
     const detail = result.mode === "isbn"
       ? `No book with ISBN ${result.isbn}${where}.`
-      : `No title, series or author matches “${query.trim()}”${where}.`;
+      : `No title, line, series or author matches “${query.trim()}”${where}.`;
     setStatus("miss", "Not in the collection", detail);
     render([]);
   } else if (result.mode === "isbn") {

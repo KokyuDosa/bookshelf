@@ -19,13 +19,14 @@ estimated_value = "price"       # market value, stored privately
 isbn = "item barcode"
 volume = "volume"               # manga and other numbered volumes; use your column's exact name
 # series = "series"             # only if a category has its own series column
+# line = "line"                 # only if a category has its own product-line column
 # A volume without a series puts the book in a series named after its title, so "Happiness"
 # with volume 3 becomes vol. 3 of the series "Happiness". Categories without these columns are fine.
 # Not mapped (kept in the stored raw row): item container, item bundles, item images,
 # item attachments, item colors, item created, item updated.
 
 [title_rules]
-series_separator = ";"          # "DND 3.5; Monster Manual" -> series "DND 3.5", title "Monster Manual"
+line_separator = ";"            # "DND 3.5; Monster Manual" -> product line "DND 3.5", title "Monster Manual"
 extract_copies = true           # "(2 Copies)" -> copies = 2
 extract_format = true           # "(Hardcover)", "Box Set" -> format
 

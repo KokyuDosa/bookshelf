@@ -13,7 +13,7 @@ import tomllib
 import zipfile
 from collections.abc import Iterator
 from contextlib import closing
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -118,10 +118,27 @@ def load_corrections(path: Path | None) -> dict[str, dict[str, str]]:
 # ---------------------------------------------------------------- write
 
 
-def row_hash(mapped: MappedRow) -> str:
-    """Hash of the mapped values, so a change in export formatting alone isn't an edit."""
-    payload = json.dumps([asdict(mapped.book), mapped.flags], sort_keys=True, ensure_ascii=False)
-    return hashlib.sha256(payload.encode()).hexdigest()
+HASH_VERSION = "cells-v1:"
+
+
+def row_hash(cells: dict[str, str]) -> str:
+    """Fingerprint of the export row itself (after corrections), not of what bookshelf made of it.
+
+    SQLite is the master copy, so a re-import may only touch a book when its row in the export
+    really changed. Hashing the mapped values instead would make every mapping-rule change look
+    like an edit and overwrite your fixes. Empty cells are left out, so a new, empty column in
+    the export doesn't count as a change either.
+    """
+    filled = {k: " ".join(v.split()) for k, v in cells.items() if v and v.strip()}
+    payload = json.dumps(filled, sort_keys=True, ensure_ascii=False)
+    return HASH_VERSION + hashlib.sha256(payload.encode()).hexdigest()
+
+
+def _unchanged(old_hash: str, old_raw_json: str, digest: str, raw: "RawRow") -> bool:
+    if old_hash.startswith(HASH_VERSION):
+        return old_hash == digest
+    # Rows imported before cells were hashed: compare the stored original row instead.
+    return json.loads(old_raw_json) == raw.cells
 
 
 def _flag(conn, run_id, book_id, reason, details, candidate=None) -> bool:
@@ -144,20 +161,23 @@ def _write_row(
     run_id: int,
     m: Mapping,
     raw: RawRow,
+    cells: dict[str, str],
     mapped: MappedRow,
     report: Report,
+    remap: bool = False,
 ) -> None:
-    digest = row_hash(mapped)
+    digest = row_hash(cells)
     raw_json = json.dumps(raw.cells, ensure_ascii=False)
     known = conn.execute(
-        "SELECT book_id, row_hash FROM source_records WHERE source = ? AND source_key = ?",
+        "SELECT book_id, row_hash, raw_json FROM source_records "
+        "WHERE source = ? AND source_key = ?",
         (m.source, mapped.key),
     ).fetchone()
 
     flags = [(reason, details, None) for reason, details in mapped.flags]
     if known:  # seen before: the source is authoritative for what it supplies
-        book_id, old_hash = known
-        if old_hash == digest:
+        book_id, old_hash, old_raw_json = known
+        if _unchanged(old_hash, old_raw_json, digest, raw) and not remap:
             report.unchanged += 1
         else:
             update_book(conn, book_id, mapped.book, "overwrite")
@@ -183,7 +203,7 @@ def _write_row(
             book_id = add_book(conn, mapped.book)
             report.inserted += 1
             if candidates:
-                details = f"same series, title, first author and year as book {candidates[0]}"
+                details = f"same line, series, volume, title, first author and year as book {candidates[0]}"
                 flags.append(("possible_duplicate", details, candidates[0]))
         conn.execute(
             "INSERT INTO source_records (source, source_key, book_id, row_hash, raw_json, "
@@ -202,7 +222,10 @@ def import_file(
     mapping: Mapping,
     corrections: dict[str, dict[str, str]] | None = None,
     dry_run: bool = False,
+    remap: bool = False,
 ) -> Report:
+    """remap: re-apply the mapping to every row, even unchanged ones. This overwrites the
+    fields the export fills, including edits you made in bookshelf."""
     corrections = corrections or {}
     report = Report(file=path.name, dry_run=dry_run)
     seen: set[str] = set()
@@ -242,7 +265,7 @@ def import_file(
                     mapped = map_row(cells, mapping)
                     conn.execute("SAVEPOINT row")
                     try:
-                        _write_row(conn, run_id, mapping, raw, mapped, report)
+                        _write_row(conn, run_id, mapping, raw, cells, mapped, report, remap)
                         conn.execute("RELEASE row")
                     except Exception:
                         conn.execute("ROLLBACK TO row")

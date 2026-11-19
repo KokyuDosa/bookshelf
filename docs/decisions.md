@@ -42,20 +42,23 @@ Dropped columns (kept in `source_records.raw_json`): item container, bundles, im
 | # | Decision | Choice |
 | --- | --- | --- |
 | W1 | Export format | Option A: `site/data/books.json` searched by plain JavaScript; no sql.js. Plus `books.csv` for friends. |
-| W2 | Public fields | title, subtitle, series, volume, authors, edition, format, publisher, year, ISBN, copies, tags, cover. Condition and shelf stay private along with everything in `book_private`. |
+| W2 | Public fields | title, subtitle, line (W9), series, volume, authors, edition, format, publisher, year, ISBN, copies, tags, cover. Condition and shelf stay private along with everything in `book_private`. |
 | W3 | Search rules | Every typed word must start a word of the title, subtitle, series or authors; ISBN-shaped input is an exact lookup. `search.js` and `search.py` follow the same rules, and a test checks JavaScript normalisation against Python on thousands of strings. |
 | W4 | Deterministic export | `as_of` is the latest `updated_at`, not the export time, so an unchanged database exports identical files and `publish` has nothing to commit. |
 | W5 | Deploy | GitHub Actions runs ruff and pytest (including a privacy check on the published JSON), then deploys `site/`. A failing test keeps the old site live. |
 | W6 | Manga and omnibuses | Series name + `series_index` for the volume (`--volume`); "Omnibus" goes in `edition`. No schema change needed. |
 | W7 | Open Library | `jscmd=data` endpoint; responses cached in `api_cache` (migration 002); 1 request a second, 3 with `BOOKSHELF_CONTACT`; enrichment fills empty fields only and never subtitles. |
 | W8 | Numbered volumes (2026-11-18) | Mappings can fill `series` and `volume`. A volume with no series makes the title the series; a title repeating its volume is trimmed. The volume is part of the natural key (no false duplicate flags between volumes) and of the search key (`happiness 7`). The website and terminal show just "Vol. N" when series and title are the same. `bookshelf rekey` updates existing keys. |
+| W9 | Product lines (2026-11-18) | A separate `product_lines` table and `books.line_id` (migration 003), apart from numbered series; a book can have both. Migration 003 moved every series with no numbered volume into a line. Line names keep the edition ("DND 3.5"). The importer fills the line from `Line; Title` or a `line` column. The line is part of the natural key, the search key, the website (shown above the title, books grouped by line) and the CSV. |
+| W10 | Re-import change detection (2026-11-18) | `source_records.row_hash` fingerprints the export row's cells after corrections (prefix `cells-v1:`), not the mapped values, so a mapping-rule change never overwrites edits. Rows hashed the old way are compared by their stored `raw_json` and upgraded on the next import. `import --remap` re-applies the mapping on purpose. |
+| W11 | Batch edits (2026-11-18) | `edit-many`: filters combine with AND, at least one is required (`--all` to mean everything), removed books are skipped unless asked. One transaction: every change is listed, confirmed once, and a refusal on any book saves nothing. Single-book values (title, ISBN, volume, cover, Open Library key) can't be batch-set; abbreviations are off. |
 
 ## Consequences to remember
 
 - `shelf`, `condition` and `acquired_on` describe all copies of an edition together (row 1).
-- The natural key includes the series name, so "Ashen Stars; Core Rulebook" and "Cyberpunk Red; Core Rulebook" are never flagged as duplicates. It does not include the edition: two editions of one book with no author or year are flagged, and you resolve the flag as `distinct`.
+- The natural key includes the line and series names, so "Ashen Stars; Core Rulebook" and "Cyberpunk Red; Core Rulebook" are never flagged as duplicates. It does not include the edition: two editions of one book with no author or year are flagged, and you resolve the flag as `distinct`.
 - A re-import overwrites only fields the export supplies; values it leaves empty (such as years filled in by Open Library) are kept. A book first matched by ISBN is only gap-filled, never overwritten.
 - A review flag you resolve stays resolved across re-imports.
 - Money is stored in integer cents (`purchase_price_cents`) to avoid floating-point rounding.
 - Names with a compound surname and no particle ("Gabriel García Márquez") must be entered as "Last, First"; the parser can't tell the surname from a middle name.
-- Changing `normalize.py` changes stored keys: run a rekey (planned) after any change to it or after a Python upgrade that alters the shared test cases.
+- Changing `normalize.py` changes stored keys: run `bookshelf rekey` after any change to it or after a Python upgrade that alters the shared test cases.

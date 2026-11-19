@@ -28,8 +28,8 @@ def test_migrate_twice_is_a_noop(tmp_path, capsys):
     assert f"Already at version {LATEST}" in capsys.readouterr().out
 
 
-def test_version_1_database_upgrades_to_2(tmp_path, capsys):
-    """Your real books.db is at version 1 after the TTRPG import; migrate must add api_cache."""
+def test_version_1_database_upgrades_to_latest(tmp_path, capsys):
+    """A database made by the first release (version 1) must upgrade all the way."""
     import shutil
 
     from bookshelf import migrations
@@ -41,6 +41,6 @@ def test_version_1_database_upgrades_to_2(tmp_path, capsys):
     db = tmp_path / "books.db"
     migrations.migrate(db, only_v1)
     assert main(["--db", str(db), "migrate"]) == 0
-    assert "Migrated 1 -> 2" in capsys.readouterr().out
+    assert f"Migrated 1 -> {LATEST}" in capsys.readouterr().out
     with closing(sqlite3.connect(db)) as conn:
         assert conn.execute("SELECT count(*) FROM api_cache").fetchone()[0] == 0

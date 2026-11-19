@@ -31,11 +31,11 @@ def row(**cells):
 
 
 @pytest.mark.parametrize(
-    ("raw", "title", "series", "copies", "fmt"),
+    ("raw", "title", "line", "copies", "fmt"),
     [
         ("DND 3.5; Monster Manual", "Monster Manual", "DND 3.5", 1, None),
         ("HEX; Secrets (EGS; 1003)", "Secrets (EGS; 1003)", "HEX", 1, None),  # first ';' only
-        ("; Orphan", "; Orphan", None, 1, None),  # no series text: no split
+        ("; Orphan", "; Orphan", None, 1, None),  # no line text: no split
         ("Call of Cthulhu: Arkham", "Call of Cthulhu: Arkham", None, 1, None),  # colon stays
         ("DND 3.5; Player's Handbook (2 Copies)", "Player's Handbook", "DND 3.5", 2, None),
         ("Mysteries, 2 Copies Of This Book", "Mysteries", None, 2, None),
@@ -55,9 +55,9 @@ def row(**cells):
         ("Mindjammer : The Game  (Hardcover)", "Mindjammer: The Game", None, 1, "hardcover"),
     ],
 )
-def test_split_title(raw, title, series, copies, fmt):
+def test_split_title(raw, title, line, copies, fmt):
     parts = split_title(raw, MAPPING)
-    assert (parts.title, parts.series, parts.copies, parts.format) == (title, series, copies, fmt)
+    assert (parts.title, parts.line, parts.copies, parts.format) == (title, line, copies, fmt)
 
 
 @pytest.mark.parametrize(
@@ -106,8 +106,9 @@ def test_map_full_row():
     )
     b = mapped.book
     assert mapped.key == "ID-1" and mapped.flags == []
-    assert (b.series, b.title, b.edition, b.condition) == (
+    assert (b.line, b.series, b.title, b.edition, b.condition) == (
         "Shadowrun 2E",
+        None,
         "Lone Star",
         "2nd",
         "like_new",

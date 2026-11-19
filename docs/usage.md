@@ -23,11 +23,13 @@ bookshelf publish
 | --- | --- |
 | Check whether you own something | `bookshelf search hollow earth` or `bookshelf search 978-1-4243-0829-3` |
 | Add a book by its barcode number | `bookshelf add 9781421534466` |
+| Add a game book | `bookshelf add 9780786928866 --line "DND 3.5"` |
 | Add a manga volume | `bookshelf add 9781421534466 --series "One Piece" --volume 52 --tag Manga` |
 | Add an omnibus | `bookshelf add --title "Berserk Deluxe Edition" --series "Berserk Deluxe" --volume 1 --edition Omnibus --format hardcover` |
 | Add a book with no ISBN | `bookshelf add --title "The Time Machine" --author "H. G. Wells" --year 1895` |
 | Add a translation or anthology | `--author`, `--translator`, `--editor`, `--illustrator`, in credit order |
 | See or fix one book | `bookshelf show 56`, `bookshelf edit 56 --clear isbn` (see below) |
+| Change many books at once | `bookshelf edit-many --title-has "call of cthulhu" --line "Call of Cthulhu"` (see below) |
 | Count a second copy | `bookshelf add 9780786928866 --another-copy` |
 | Keep a book off the website | add `--hidden` |
 | Record its value (private) | add `--value 45.00` |
@@ -75,8 +77,8 @@ Keep export files in `data\imports\`: that folder is private and never reaches G
   anything), so make fixes in bookshelf, not MyStuff2.
 - **Books you already have:** a row whose ISBN you already own, for example one added by hand,
   only fills that book's empty fields; it doesn't add a second copy of the book.
-- **Titles:** `Series; Title` becomes a series and a title, `(2 Copies)` sets the copy count,
-  and `(Hardcover)` or `Box Set` sets the format.
+- **Titles:** `Line; Title` becomes a product line and a title ("DND 3.5; Monster Manual"),
+  `(2 Copies)` sets the copy count, and `(Hardcover)` or `Box Set` sets the format.
 - **Volumes:** the `volume` column sets the volume number ("3", "03", "Vol. 3", "v3" and "2.5"
   all work). A volume without a series makes the title the series, so ten rows titled
   "Happiness" with volumes 1 to 10 become volumes 1 to 10 of the series "Happiness". A title that
@@ -84,15 +86,23 @@ Keep export files in `data\imports\`: that folder is private and never reaches G
   number, such as "1-3" for an omnibus, is flagged for review, and you set it with
   `bookshelf edit <number> --volume 1 --edition Omnibus`. Categories without a `volume` column
   get a one-line note on import, nothing more.
-- **Same title, different volume:** the duplicate check compares series, volume, title, first
-  author and year, so volumes 1 to 10 of "Happiness" are never flagged as duplicates of each
+- **Same title, different volume:** the duplicate check compares line, series, volume, title,
+  first author and year, so volumes 1 to 10 of "Happiness" are never flagged as duplicates of each
   other. Importing volume 3 twice under different item IDs is.
 - **Genres** become tags.
 
 ### Teaching it new values
 
-These live in `config\mappings\mystuff2.toml`. After editing, run the import again: unchanged
-rows are skipped, and the affected rows update.
+These live in `config\mappings\mystuff2.toml`. A re-import only touches rows that changed *in
+the export*, so after editing the mapping, re-apply it with `--remap`:
+
+```powershell
+bookshelf import data\imports\Books.csv --remap --dry-run
+```
+
+`--remap` overwrites every field the export fills, including fixes you made with `edit` or
+`edit-many` (a trimmed title goes back to the export's title, for example), so check the
+dry run first. Fields the export doesn't fill, such as a line you set by hand, are kept.
 
 - **A new condition word** (say "Near Mint"): add it under `[condition_values]`, for example
   `"near mint" = "excellent"`.
@@ -134,7 +144,8 @@ bookshelf import data\imports\mylist.csv --mapping mylist --dry-run
 ```
 
 Its corrections file is `data\imports\mylist-corrections.toml`. A mapping can fill title,
-authors, publisher, tags, pages, edition, condition, estimated_value, isbn, series and volume.
+authors, publisher, tags, pages, edition, condition, estimated_value, isbn, line, series and
+volume. A `line` column wins over a `Line; Title` title.
 There's no separate year or format column yet.
 
 If your manga category calls its column something other than `volume` (MyStuff2 uses your
@@ -155,9 +166,11 @@ not `#56`: a `#` starts a comment there.
 | Fix several things at once | `bookshelf edit 56 --year 2003 --publisher "Wizards of the Coast" --condition "very good"` |
 | Replace the credits (order kept) | `bookshelf edit 56 --author "Skip Williams" --author "Jonathan Tweet" --editor "Kim Mohan"` |
 | Move into a series | `bookshelf edit "berserk deluxe" --series "Berserk Deluxe" --volume 1` |
+| Put into a product line | `bookshelf edit 56 --line "DND 3.5"` |
+| Cut a prefix off the title | `bookshelf edit 56 --trim-title "Call of Cthulhu:"` |
 | Tags | `bookshelf edit 56 --add-tag Classics --remove-tag TTRPG` |
 | Private details | `--value 120`, `--price 45`, `--notes "Signed"`, `--loaned-to Sam --loaned-on 2026-11-01` |
-| Empty any field | `--clear FIELD` (repeatable): isbn, series, volume, authors, tags, value, loan, … |
+| Empty any field | `--clear FIELD` (repeatable): isbn, line, series, volume, authors, tags, value, loan, … |
 | Gave it away or sold it | `bookshelf edit 56 --remove` (today) or `--remove 2026-11-17` |
 | Changed your mind | `bookshelf edit 56 --restore` |
 
@@ -166,6 +179,58 @@ Anything it refuses changes nothing. Clears happen before sets, so `--clear seri
 moves a book in one go. A removed book stays in the database with its history, drops out of
 searches and the website, and is never re-added by a re-import. Edits survive re-importing an
 unchanged MyStuff2 export, because unchanged rows are skipped.
+
+### Lines and series
+
+A **product line** groups books that belong together without an order: "DND 3.5",
+"Call of Cthulhu", "Shadowrun 5E". A **series** is numbered: "Rise of the Runelords" 1 to 6,
+"Happiness" vol. 7. A book can have both (a Pathfinder adventure path is in the line
+"Pathfinder" and a series). Keep the edition in the line's name ("DND 3.5", not "DND" plus an
+edition), because the website groups and sorts by the name.
+
+## Changing many books at once
+
+`edit-many` chooses books with filters, then makes the same change to each of them. It lists
+every change, asks once, and saves all of them or none: if one book refuses (say, a loan date
+without a borrower), nothing is saved and it tells you which book.
+
+```powershell
+# Every book with "Call of Cthulhu" in its title goes into that line, and loses the prefix
+bookshelf edit-many --title-has "call of cthulhu" --line "Call of Cthulhu" --trim-title "Call of Cthulhu:"
+```
+
+Choosing books (give at least one; several must all match):
+
+| Filter | Chooses |
+| --- | --- |
+| `--title-has WORDS` | these words, next to each other, in the title (case and accents ignored, whole words) |
+| `--match QUERY` | what `bookshelf search QUERY` finds (title, subtitle, line, series, authors) |
+| `--in-line NAME`, `--in-series NAME` | books in that line or series |
+| `--has-tag TAG` | books with that tag; repeat to need several |
+| `--from-publisher NAME` | books from that publisher |
+| `--no-isbn` | books without an ISBN |
+| `--ids 3,5,9-12` | those book numbers |
+| `--except 7,8` | leaves those numbers out |
+| `--all` | every book |
+| `--include-removed` | also books you've marked removed |
+
+The changes are the same as `edit`'s, except the ones that only make sense for one book:
+`--title`, `--isbn`, `--volume`, `--cover` and `--ol-key`. Useful ones:
+
+| To | Add |
+| --- | --- |
+| Set the line or series | `--line "DND 3.5"`, `--series "Rise of the Runelords"` |
+| Cut a prefix off each title | `--trim-title "Call of Cthulhu:"` (any case; `:` `;` `-` or a space after it all work; a title that would end up empty is left alone) |
+| Tags | `--add-tag Horror`, `--remove-tag TTRPG` |
+| Shelf, condition, format, publisher | `--shelf "Office 3"`, `--condition good`, `--format hardcover`, `--publisher Chaosium` |
+| Empty a field | `--clear line`, `--clear shelf`, … |
+
+- `--dry-run` shows the changes and saves nothing. Without `--yes`, it asks before saving.
+- Only the first 50 changed books are listed; `--show 500` lists more.
+- Options can't be shortened for `edit-many` (`--title` is not `--title-has`), so a typo is an
+  error rather than a different filter.
+- A later re-import leaves these changes alone unless the row changed in MyStuff2 or you use
+  `--remap`.
 
 ## Adding: details
 
@@ -179,7 +244,7 @@ so scripts can use it.
 
 ## What the website shows
 
-Title, subtitle, series and volume, authors, edition, format, publisher, year, ISBN, number of
+Title, subtitle, product line, series and volume, authors, edition, format, publisher, year, ISBN, number of
 copies, tags and the Open Library cover. Never: values, prices, notes, loans, shelf, condition,
 books added with `--hidden`, or books you've removed. Friends can download the same list as a
 CSV from the bottom of the page, and you can share a search as a link: `…/bookshelf/?q=shadowrun`.

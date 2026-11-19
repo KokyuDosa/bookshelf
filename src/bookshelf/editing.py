@@ -5,7 +5,14 @@ import re
 import sqlite3
 from dataclasses import dataclass, field
 
-from bookshelf.catalog import Credit, _add_credits, _add_tags, get_or_create_series, refresh_keys
+from bookshelf.catalog import (
+    Credit,
+    _add_credits,
+    _add_tags,
+    get_or_create_line,
+    get_or_create_series,
+    refresh_keys,
+)
 from bookshelf.export import public_books
 from bookshelf.isbn import InvalidISBN, looks_like_isbn, to_isbn10, to_isbn13
 from bookshelf.normalize import normalize_text
@@ -21,7 +28,7 @@ class Found:
 
 
 def resolve(conn: sqlite3.Connection, ref: str) -> Found:
-    """A book number ("57"), an ISBN in any form, or words from the title, series or authors.
+    """A book number ("57"), an ISBN in any form, or words from the title, line, series or authors.
     Numbers and ISBNs also find removed books, so they can be shown and restored."""
     ref = ref.strip().lstrip("#")
     if looks_like_isbn(ref):
@@ -47,7 +54,8 @@ def resolve(conn: sqlite3.Connection, ref: str) -> Found:
 
 def details(conn: sqlite3.Connection, book_id: int) -> dict:
     b = conn.execute(
-        "SELECT b.*, s.name AS series FROM books b LEFT JOIN series s USING (series_id) "
+        "SELECT b.*, s.name AS series, pl.name AS line FROM books b "
+        "LEFT JOIN series s USING (series_id) LEFT JOIN product_lines pl USING (line_id) "
         "WHERE b.book_id = ?",
         (book_id,),
     ).fetchone()
@@ -75,6 +83,7 @@ def details(conn: sqlite3.Connection, book_id: int) -> dict:
         "id": b["book_id"],
         "title": b["title"],
         "subtitle": b["subtitle"],
+        "line": b["line"],
         "series": b["series"],
         "volume": b["series_index"],
         "edition": b["edition"],
@@ -134,6 +143,7 @@ def flatten(d: dict) -> dict[str, str | None]:
     return {
         "title": d["title"],
         "subtitle": d["subtitle"],
+        "line": d["line"],
         "series": d["series"],
         "volume": None if vol is None else f"{vol:g}",
         "edition": d["edition"],
@@ -165,6 +175,7 @@ SECTIONS = {
     "Book": [
         "title",
         "subtitle",
+        "line",
         "series",
         "volume",
         "credits",
@@ -247,7 +258,7 @@ PRIVATE_COLUMNS = {
 CLEARABLE = sorted(
     (set(BOOK_COLUMNS) - {"title", "copies"})
     | set(PRIVATE_COLUMNS)
-    | {"series", "loan", "authors", "tags"}
+    | {"line", "series", "loan", "authors", "tags"}
 )
 
 
@@ -255,7 +266,9 @@ CLEARABLE = sorted(
 class Edit:
     set_book: dict[str, object] = field(default_factory=dict)  # option name -> new value
     set_private: dict[str, object] = field(default_factory=dict)
+    line: str | None = None
     series: str | None = None
+    trim_title: str | None = None  # a prefix to cut off the title, e.g. "Call of Cthulhu:"
     clear: list[str] = field(default_factory=list)
     credits: list[Credit] | None = None  # replaces all credits when given
     add_tags: list[str] = field(default_factory=list)
@@ -267,7 +280,9 @@ class Edit:
         return not (
             self.set_book
             or self.set_private
+            or self.line
             or self.series
+            or self.trim_title
             or self.clear
             or self.credits is not None
             or self.add_tags
@@ -282,6 +297,27 @@ def _check_date(label: str, value: str) -> str:
         return dt.date.fromisoformat(value).isoformat()
     except ValueError:
         raise ValueError(f"{label} must be a date like 2026-11-17, not {value!r}") from None
+
+
+# what may sit between a prefix and the rest of the title: "Call of Cthulhu: Arkham"
+SEPARATORS = r"[\s:;,\-\u2013\u2014]*"
+
+
+def trim_prefix(title: str, prefix: str) -> str:
+    """ "Call of Cthulhu: Arkham Unveiled" minus "Call of Cthulhu" -> "Arkham Unveiled".
+
+    Case-insensitive, and only whole words: "Call of Cthulhu" doesn't trim "Call of Cthulhuism".
+    A title that doesn't start with the prefix, or would be left with nothing, comes back as is.
+    """
+    words = re.sub(rf"{SEPARATORS}$", "", prefix).split()  # "Call of Cthulhu:" = "Call of Cthulhu"
+    if not words:
+        return title
+    pattern = r"\s+".join(re.escape(w) for w in words)
+    hit = re.match(rf"\s*{pattern}(?:(?<=\W)|(?=\W|$)){SEPARATORS}", title, re.IGNORECASE)
+    if not hit:
+        return title
+    rest = " ".join(title[hit.end() :].split())
+    return rest if normalize_text(rest) else title
 
 
 def apply_edit(conn: sqlite3.Connection, book_id: int, e: Edit) -> None:
@@ -304,6 +340,13 @@ def apply_edit(conn: sqlite3.Connection, book_id: int, e: Edit) -> None:
         sets["acquired"] = _check_date("--acquired", str(sets["acquired"]))
     if "title" in sets and not normalize_text(str(sets["title"])):
         raise ValueError("the title needs at least one letter or digit")
+    if e.trim_title:
+        if "title" in sets:
+            raise ValueError("give either --title or --trim-title, not both")
+        stored = conn.execute("SELECT title FROM books WHERE book_id = ?", (book_id,)).fetchone()[0]
+        trimmed = trim_prefix(stored, e.trim_title)
+        if trimmed != stored:
+            sets["title"] = trimmed
 
     has_series = conn.execute(
         "SELECT series_id FROM books WHERE book_id = ?", (book_id,)
@@ -318,11 +361,15 @@ def apply_edit(conn: sqlite3.Connection, book_id: int, e: Edit) -> None:
     for name in e.clear:
         if name == "series":
             columns.update(series_id=None, series_index=None)
+        elif name == "line":
+            columns["line_id"] = None
         elif name in BOOK_COLUMNS:
             columns[BOOK_COLUMNS[name]] = None
     columns.update({BOOK_COLUMNS[k]: v for k, v in sets.items()})
     if e.series:
         columns["series_id"] = get_or_create_series(conn, e.series)
+    if e.line:
+        columns["line_id"] = get_or_create_line(conn, e.line)
     if e.remove_on:
         columns["removed_on"] = _check_date("--remove", e.remove_on)
     if e.restore:
@@ -380,3 +427,108 @@ def changes(before: dict[str, str | None], after: dict[str, str | None]) -> list
         for k in before
         if before[k] != after[k]
     ]
+
+
+# ---------------------------------------------------------------- choosing many books
+
+
+def parse_ids(text: str) -> set[int]:
+    """ "3,5,9-12" -> {3, 5, 9, 10, 11, 12}."""
+    ids: set[int] = set()
+    for part in (p.strip() for p in text.split(",")):
+        if not part:
+            continue
+        hit = re.fullmatch(r"#?(\d+)(?:\s*-\s*#?(\d+))?", part)
+        if not hit:
+            raise ValueError(f"{part!r} isn't a book number or a range like 9-12")
+        low, high = int(hit.group(1)), int(hit.group(2) or hit.group(1))
+        if high < low:
+            raise ValueError(f"the range {part!r} runs backwards")
+        if high - low > 100_000:
+            raise ValueError(f"the range {part!r} is too long")
+        ids.update(range(low, high + 1))
+    return ids
+
+
+@dataclass
+class Selection:
+    """Which books edit-many changes. Every filter given must match (they combine with AND)."""
+
+    title_has: str | None = None  # words appearing together in the title
+    match: str | None = None  # the same rules as `bookshelf search`
+    in_line: str | None = None
+    in_series: str | None = None
+    has_tags: list[str] = field(default_factory=list)
+    from_publisher: str | None = None
+    no_isbn: bool = False
+    ids: set[int] | None = None
+    except_ids: set[int] = field(default_factory=set)
+    everything: bool = False
+    include_removed: bool = False
+
+    def is_empty(self) -> bool:
+        return not (
+            self.title_has
+            or self.match
+            or self.in_line
+            or self.in_series
+            or self.has_tags
+            or self.from_publisher
+            or self.no_isbn
+            or self.ids is not None
+            or self.everything
+        )
+
+
+def _same(a: str | None, b: str) -> bool:
+    return a is not None and normalize_text(a) == normalize_text(b)
+
+
+def select_books(conn: sqlite3.Connection, sel: Selection) -> list[int]:
+    """The numbers of the books matching every filter in `sel`, in order."""
+    if sel.is_empty():
+        raise ValueError("choose some books first (or use --all to change every book)")
+    tags: dict[int, set[str]] = {}
+    for book_id, key in conn.execute(
+        "SELECT bt.book_id, t.name_key FROM book_tags bt JOIN tags t USING (tag_id)"
+    ):
+        tags.setdefault(book_id, set()).add(key)
+    matched: set[int] | None = None
+    if sel.match:
+        result = search(public_books(conn, include_hidden=True), sel.match)
+        if result.mode in ("empty", "bad-isbn"):
+            raise ValueError(f"--match {sel.match!r} isn't something search can look for")
+        matched = {b["id"] for b in result.books}
+    phrase = f" {normalize_text(sel.title_has)} " if sel.title_has else None
+    if phrase is not None and not phrase.strip():
+        raise ValueError("--title-has needs at least one letter or digit")
+    wanted_tags = {normalize_text(t) for t in sel.has_tags}
+
+    chosen = []
+    for book_id, title, line, series, publisher, isbn, removed in conn.execute(
+        "SELECT b.book_id, b.title, pl.name, s.name, b.publisher, b.isbn13, b.removed_on "
+        "FROM books b LEFT JOIN series s USING (series_id) "
+        "LEFT JOIN product_lines pl USING (line_id) ORDER BY b.book_id"
+    ):
+        if removed and not sel.include_removed:
+            continue
+        if sel.ids is not None and book_id not in sel.ids:
+            continue
+        if book_id in sel.except_ids:
+            continue
+        if phrase and phrase not in f" {normalize_text(title)} ":
+            continue
+        if matched is not None and book_id not in matched:
+            continue
+        if sel.in_line and not _same(line, sel.in_line):
+            continue
+        if sel.in_series and not _same(series, sel.in_series):
+            continue
+        if not wanted_tags <= tags.get(book_id, set()):
+            continue
+        if sel.from_publisher and not _same(publisher, sel.from_publisher):
+            continue
+        if sel.no_isbn and isbn:
+            continue
+        chosen.append(book_id)
+    return chosen

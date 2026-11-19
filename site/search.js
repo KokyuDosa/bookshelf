@@ -67,6 +67,7 @@ export function prepare(books) {
     b._title = normalizeText(b.title);
     b._sort = sortKey(b.title);
     b._seriesSort = b.series ? sortKey(b.series) : "";
+    b._lineSort = b.line ? sortKey(b.line) : "";
   }
   return books;
 }
@@ -114,9 +115,12 @@ export function search(books, query) {
   return { mode: "text", results: hits.map(h => h[1]) };
 }
 
-// Browse order: series together and in volume order, then by title.
+// Browse order: a product line's books together, inside it each series together and in
+// volume order, then by title. Python's books_csv sorts the same way.
 export function compareBooks(a, b) {
-  const ka = a._seriesSort || a._sort, kb = b._seriesSort || b._sort;
+  const ga = a._lineSort || a._seriesSort || a._sort, gb = b._lineSort || b._seriesSort || b._sort;
+  if (ga !== gb) return ga.localeCompare(gb);
+  const ka = a._lineSort ? a._seriesSort || a._sort : "", kb = b._lineSort ? b._seriesSort || b._sort : "";
   if (ka !== kb) return ka.localeCompare(kb);
   if ((a.volume ?? 0) !== (b.volume ?? 0)) return (a.volume ?? 0) - (b.volume ?? 0);
   return a._sort.localeCompare(b._sort);

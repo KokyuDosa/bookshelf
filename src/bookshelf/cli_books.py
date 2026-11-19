@@ -1,4 +1,4 @@
-"""The everyday commands: add, show, edit, search, enrich, export, publish."""
+"""The everyday commands: add, show, edit, edit-many, search, enrich, export, publish."""
 
 import argparse
 import datetime as dt
@@ -14,12 +14,15 @@ from bookshelf.db import connect
 from bookshelf.editing import (
     CLEARABLE,
     Edit,
+    Selection,
     apply_edit,
     changes,
     details,
     flatten,
     format_details,
+    parse_ids,
     resolve,
+    select_books,
 )
 from bookshelf.entry import enrich, find_owned, lookup_code
 from bookshelf.export import public_books, write_export
@@ -96,7 +99,7 @@ def _add(conn: sqlite3.Connection, args: argparse.Namespace) -> int:
             return fail(f"{args.isbn!r} isn't a valid ISBN ({exc.reason.replace('_', ' ')}).")
         owned = find_owned(conn, isbn13)
         if owned:
-            label = f"{owned['series']}; {owned['title']}" if owned["series"] else owned["title"]
+            label = "; ".join(p for p in (owned["line"], owned["series"], owned["title"]) if p)
             if args.another_copy:
                 conn.execute(
                     "UPDATE books SET copies = copies + 1 WHERE book_id = ?", (owned["book_id"],)
@@ -140,6 +143,7 @@ def _add(conn: sqlite3.Connection, args: argparse.Namespace) -> int:
             edition=normalize_edition(args.edition) if args.edition else None,
             format=lookup_code(conn, "format", args.format) if args.format else None,
             condition=lookup_code(conn, "condition", args.condition) if args.condition else None,
+            line=args.line,
             series=args.series,
             series_index=args.volume,
             copies=args.copies,
@@ -163,6 +167,7 @@ def _add(conn: sqlite3.Connection, args: argparse.Namespace) -> int:
     preview = {
         "title": book.title,
         "subtitle": book.subtitle,
+        "line": book.line,
         "series": book.series,
         "volume": book.series_index,
         "authors": [c.name for c in book.credits],
@@ -233,7 +238,9 @@ def cmd_show(args: argparse.Namespace) -> int:
 def build_edit(conn: sqlite3.Connection, args: argparse.Namespace) -> Edit:
     """Command-line options -> an Edit. ValueError for values that can't be used."""
     e = Edit(
+        line=args.line,
         series=args.series,
+        trim_title=args.trim_title,
         clear=args.clear or [],
         credits=args.credits,
         add_tags=args.add_tag or [],
@@ -255,10 +262,10 @@ def build_edit(conn: sqlite3.Connection, args: argparse.Namespace) -> Edit:
         "volume",
         "acquired",
     ):
-        value = getattr(args, name.replace("-", "_"))
+        value = getattr(args, name.replace("-", "_"), None)  # edit-many lacks some
         if value is not None:
             e.set_book[name] = value
-    if args.ol_key is not None:
+    if getattr(args, "ol_key", None) is not None:
         e.set_book["ol-key"] = args.ol_key
     if args.edition is not None:
         e.set_book["edition"] = normalize_edition(args.edition)
@@ -314,6 +321,90 @@ def cmd_edit(args: argparse.Namespace) -> int:
             return 1
         conn.commit()
     print("Saved. Run 'bookshelf publish' to update the website.")
+    return 0
+
+
+def selection_from(args: argparse.Namespace) -> Selection:
+    return Selection(
+        title_has=args.title_has,
+        match=args.match,
+        in_line=args.in_line,
+        in_series=args.in_series,
+        has_tags=args.has_tag or [],
+        from_publisher=args.from_publisher,
+        no_isbn=args.no_isbn,
+        ids=parse_ids(args.ids) if args.ids else None,
+        except_ids=parse_ids(args.except_ids) if args.except_ids else set(),
+        everything=args.all,
+        include_removed=args.include_removed,
+    )
+
+
+def cmd_edit_many(args: argparse.Namespace) -> int:
+    conn = open_db(args.db)
+    if conn is None:
+        return 1
+    with closing(conn):
+        try:
+            sel = selection_from(args)
+            if sel.is_empty():
+                return fail(
+                    "Choose the books to change with filters such as --title-has, --in-line, "
+                    "--has-tag or --ids (or --all for every book)."
+                )
+            book_ids = select_books(conn, sel)
+            edit = build_edit(conn, args)
+        except ValueError as exc:
+            return fail(str(exc))
+        if edit.is_empty():
+            return fail(
+                "Nothing to change. Try options like --line, --series, --add-tag or --trim-title "
+                "(bookshelf edit-many --help lists them all)."
+            )
+        if not book_ids:
+            print("No books match those filters.")
+            return 1
+
+        # Every book is changed inside one transaction, so a refusal anywhere undoes all of it.
+        changed: list[tuple[int, str, list[str]]] = []
+        for book_id in book_ids:
+            before = flatten(details(conn, book_id))
+            try:
+                apply_edit(conn, book_id, edit)
+            except (ValueError, sqlite3.IntegrityError) as exc:
+                conn.rollback()
+                return fail(f"Book {book_id} ({before['title']}): {exc}\nNothing changed.")
+            diff = changes(before, flatten(details(conn, book_id)))
+            if diff:
+                changed.append((book_id, str(before["title"]), diff))
+
+        print(f"{len(book_ids)} {'book matches' if len(book_ids) == 1 else 'books match'}.")
+        for book_id, title, diff in changed[: args.show]:
+            print(f"Book {book_id}: {title}")
+            print("\n".join(diff))
+        if len(changed) > args.show:
+            print(f"… and {len(changed) - args.show} more changed books (see them with --show).")
+        if unchanged := len(book_ids) - len(changed):
+            print(f"{unchanged} already had those values.")
+        if not changed:
+            conn.rollback()
+            print("Nothing to save.")
+            return 0
+        if args.dry_run:
+            conn.rollback()
+            print("Dry run: nothing saved.")
+            return 0
+        if not args.yes:
+            if not interactive():
+                conn.rollback()
+                print("Not saved. Check the list above, then run again with --yes.")
+                return 1
+            if not confirm(f"Save the changes to {len(changed)} books?"):
+                conn.rollback()
+                print("Nothing changed.")
+                return 1
+        conn.commit()
+    print(f"Saved changes to {len(changed)} books. Run 'bookshelf publish' to update the website.")
     return 0
 
 
@@ -426,13 +517,68 @@ def add_credit_options(p: argparse.ArgumentParser, verb: str) -> None:
         )
 
 
+def add_change_options(p: argparse.ArgumentParser, many: bool) -> None:
+    """The changes `edit` accepts. edit-many leaves out values that belong to one book only."""
+    g = p.add_argument_group("changes") if many else p
+    names = ["subtitle", "publisher", "edition", "language", "shelf", "notes"]
+    if not many:
+        names[:0] = ["title", "isbn"]
+    for name in names:
+        g.add_argument(f"--{name}")
+    g.add_argument(
+        "--trim-title",
+        metavar="PREFIX",
+        help="cut this from the start of the title, e.g. 'Call of Cthulhu:'",
+    )
+    g.add_argument("--line", help="product line, e.g. 'DND 3.5' (created if new)")
+    g.add_argument("--series", help="numbered series (created if new)")
+    if not many:
+        g.add_argument("--volume", type=float, help="number in the series")
+    g.add_argument(
+        "--format",
+        help="hardcover, trade paperback, mass market, paperback, box set, ebook, audiobook, other",
+    )
+    g.add_argument("--condition", help="mint, like new, excellent, very good, good, fair, poor")
+    g.add_argument("--year", type=int)
+    g.add_argument("--pages", type=int)
+    g.add_argument("--copies", type=int)
+    g.add_argument("--acquired", metavar="DATE", help="e.g. 2024-06-01")
+    g.add_argument("--price", help="what you paid, e.g. 12.50; private")
+    g.add_argument("--value", help="estimated value, e.g. 45.00; private")
+    g.add_argument("--loaned-to", metavar="NAME")
+    g.add_argument("--loaned-on", metavar="DATE")
+    if not many:
+        g.add_argument("--cover", metavar="URL")
+        g.add_argument("--ol-key", metavar="KEY", help="Open Library edition key, e.g. OL7353617M")
+    add_credit_options(g, "replace all credits with these people")
+    g.add_argument("--add-tag", action="append", metavar="TAG")
+    g.add_argument("--remove-tag", action="append", metavar="TAG")
+    g.add_argument(
+        "--clear",
+        action="append",
+        choices=CLEARABLE,
+        metavar="FIELD",
+        help=f"empty a field; repeat for several. One of: {', '.join(CLEARABLE)}",
+    )
+    g.add_argument(
+        "--remove",
+        nargs="?",
+        const=dt.date.today().isoformat(),
+        metavar="DATE",
+        help="mark as gone (given away, sold); kept in the database, off the website",
+    )
+    g.add_argument("--restore", action="store_true", help="undo --remove")
+    g.add_argument("--yes", "-y", action="store_true", help="save without asking to confirm")
+
+
 def register(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser("add", help="add a book by ISBN, or by hand")
     p.add_argument("isbn", nargs="?", help="ISBN-10 or ISBN-13, hyphens allowed")
     p.add_argument("--title")
     p.add_argument("--subtitle")
     add_credit_options(p, "credit a person")
-    p.add_argument("--series", help="series or game line, e.g. 'One Piece' or 'DND 3.5'")
+    p.add_argument("--line", help="product line, e.g. 'DND 3.5' or 'Call of Cthulhu'")
+    p.add_argument("--series", help="numbered series, e.g. 'One Piece'")
     p.add_argument("--volume", type=float, help="number in the series, e.g. 12 (needs --series)")
     p.add_argument("--edition", help="e.g. 2nd, Omnibus, Gold Edition")
     p.add_argument(
@@ -460,48 +606,34 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--json", action="store_true", help="print as JSON")
     p.set_defaults(func=cmd_show)
 
-    today = dt.date.today().isoformat()
     p = sub.add_parser("edit", help="change or clear any value of one book")
     p.add_argument("book", help="book number, ISBN, or words from the title (quote several words)")
-    for name in ("title", "subtitle", "isbn", "publisher", "edition", "language", "shelf", "notes"):
-        p.add_argument(f"--{name}")
-    p.add_argument("--series", help="move the book into this series (created if new)")
-    p.add_argument("--volume", type=float, help="number in the series")
-    p.add_argument(
-        "--format",
-        help="hardcover, trade paperback, mass market, paperback, box set, ebook, audiobook, other",
-    )
-    p.add_argument("--condition", help="mint, like new, excellent, very good, good, fair, poor")
-    p.add_argument("--year", type=int)
-    p.add_argument("--pages", type=int)
-    p.add_argument("--copies", type=int)
-    p.add_argument("--acquired", metavar="DATE", help="e.g. 2024-06-01")
-    p.add_argument("--price", help="what you paid, e.g. 12.50; private")
-    p.add_argument("--value", help="estimated value, e.g. 45.00; private")
-    p.add_argument("--loaned-to", metavar="NAME")
-    p.add_argument("--loaned-on", metavar="DATE")
-    p.add_argument("--cover", metavar="URL")
-    p.add_argument("--ol-key", metavar="KEY", help="Open Library edition key, e.g. OL7353617M")
-    add_credit_options(p, "replace all credits with these people")
-    p.add_argument("--add-tag", action="append", metavar="TAG")
-    p.add_argument("--remove-tag", action="append", metavar="TAG")
-    p.add_argument(
-        "--clear",
-        action="append",
-        choices=CLEARABLE,
-        metavar="FIELD",
-        help=f"empty a field; repeat for several. One of: {', '.join(CLEARABLE)}",
-    )
-    p.add_argument(
-        "--remove",
-        nargs="?",
-        const=today,
-        metavar="DATE",
-        help="mark as gone (given away, sold); kept in the database, off the website",
-    )
-    p.add_argument("--restore", action="store_true", help="undo --remove")
-    p.add_argument("--yes", "-y", action="store_true", help="save without asking to confirm")
+    add_change_options(p, many=False)
     p.set_defaults(func=cmd_edit)
+
+    p = sub.add_parser(
+        "edit-many",
+        allow_abbrev=False,  # "--title X" must not quietly become the filter --title-has X
+        help="make the same change to many books at once",
+        description="Choose books with the filters (all must match), then give the changes. "
+        "Shows every change and asks once before saving; if any book refuses, nothing is saved.",
+    )
+    f = p.add_argument_group("choosing the books (combine several to narrow down)")
+    f.add_argument("--title-has", metavar="WORDS", help="these words, together, in the title")
+    f.add_argument("--match", metavar="QUERY", help="what 'bookshelf search QUERY' would find")
+    f.add_argument("--in-line", metavar="LINE", help="books in this product line")
+    f.add_argument("--in-series", metavar="SERIES", help="books in this series")
+    f.add_argument("--has-tag", action="append", metavar="TAG", help="repeat to need several")
+    f.add_argument("--from-publisher", metavar="NAME")
+    f.add_argument("--no-isbn", action="store_true", help="books without an ISBN")
+    f.add_argument("--ids", metavar="LIST", help="book numbers, e.g. 3,5,9-12")
+    f.add_argument("--except", dest="except_ids", metavar="LIST", help="leave these numbers out")
+    f.add_argument("--all", action="store_true", help="every book")
+    f.add_argument("--include-removed", action="store_true", help="also books marked removed")
+    add_change_options(p, many=True)
+    p.add_argument("--show", type=int, default=50, metavar="N", help="list at most N changed books")
+    p.add_argument("--dry-run", action="store_true", help="show the changes, save nothing")
+    p.set_defaults(func=cmd_edit_many)
 
     p = sub.add_parser("search", help="do I own this? title, series, author or ISBN")
     p.add_argument("query", nargs="+")

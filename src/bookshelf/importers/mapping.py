@@ -43,7 +43,7 @@ FORMAT_CODES = {
 
 
 # Fields most categories don't have. A file without their column is normal, not a warning.
-OPTIONAL_FIELDS = frozenset({"series", "volume"})
+OPTIONAL_FIELDS = frozenset({"line", "series", "volume"})
 
 # "3", "03", "2.5", "Vol. 3", "Volume 3", "v3", "#3", "No. 3"
 VOLUME = re.compile(r"(?:vol(?:ume)?\.?|v\.?|#|no\.?)?\s*0*(\d+(?:\.\d+)?)", re.IGNORECASE)
@@ -77,7 +77,7 @@ class Mapping:
     key_column: str
     multi: str
     fields: dict[str, str]
-    series_separator: str | None = None
+    line_separator: str | None = None
     extract_copies: bool = False
     extract_format: bool = False
     conditions: dict[str, str] = field(default_factory=dict)
@@ -94,7 +94,8 @@ class Mapping:
             key_column=cfg["key_column"],
             multi=cfg.get("multi_value_delimiter", "|"),
             fields=cfg["fields"],
-            series_separator=rules.get("series_separator"),
+            # "series_separator" is the name used before product lines existed
+            line_separator=rules.get("line_separator", rules.get("series_separator")),
             extract_copies=rules.get("extract_copies", False),
             extract_format=rules.get("extract_format", False),
             conditions={normalize_text(k): v for k, v in cfg.get("condition_values", {}).items()},
@@ -107,7 +108,7 @@ class Mapping:
 @dataclass
 class TitleParts:
     title: str
-    series: str | None = None
+    line: str | None = None
     copies: int = 1
     format: str | None = None
 
@@ -119,11 +120,11 @@ def tidy(text: str) -> str:
 
 def split_title(raw: str, m: Mapping) -> TitleParts:
     parts = TitleParts(tidy(raw))
-    sep = m.series_separator
+    sep = m.line_separator
     if sep and sep in parts.title:
-        series, rest = (tidy(p) for p in parts.title.split(sep, 1))
-        if normalize_text(series) and normalize_text(rest):
-            parts.series, parts.title = series, rest
+        line, rest = (tidy(p) for p in parts.title.split(sep, 1))
+        if normalize_text(line) and normalize_text(rest):
+            parts.line, parts.title = line, rest
     changed = True
     while changed:  # "(2 Copies) (Hardcover)" in either order
         changed = False
@@ -185,7 +186,7 @@ def map_row(raw: dict[str, str], m: Mapping) -> MappedRow:
 
     flags: list[tuple[str, str]] = []
     parts = split_title(cell("title"), m)
-    book = NewBook(title=parts.title, series=parts.series, copies=parts.copies, format=parts.format)
+    book = NewBook(title=parts.title, line=parts.line, copies=parts.copies, format=parts.format)
 
     if isbn := cell("isbn"):
         try:
@@ -196,8 +197,10 @@ def map_row(raw: dict[str, str], m: Mapping) -> MappedRow:
     book.credits = [Credit(name) for name in multi("authors") if normalize_text(name)]
     book.tags = [t for t in multi("tags") if normalize_text(t)]
 
+    if line := cell("line"):
+        book.line = line  # a line column wins over a "Line; Title" title
     if series := cell("series"):
-        book.series = series  # a series column wins over a "Series; Title" title
+        book.series = series
     if volume := cell("volume"):
         number = parse_volume(volume)
         if number is None:

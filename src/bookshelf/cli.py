@@ -31,7 +31,9 @@ def cmd_import(args: argparse.Namespace) -> int:
     try:
         mapping = Mapping.load(mapping_file)
         corrections = load_corrections(corrections_file)
-        report = import_file(args.db, args.file, mapping, corrections, dry_run=args.dry_run)
+        report = import_file(
+            args.db, args.file, mapping, corrections, dry_run=args.dry_run, remap=args.remap
+        )
     except (OSError, ValueError) as exc:
         print(f"import failed, nothing saved: {exc}", file=sys.stderr)
         return 1
@@ -155,6 +157,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="per-item fixes (default: data/imports/<mapping>-corrections.toml, if present)",
     )
     p_import.add_argument("--dry-run", action="store_true", help="run every step, save nothing")
+    p_import.add_argument(
+        "--remap",
+        action="store_true",
+        help="re-apply the mapping to rows that haven't changed (after editing the mapping file)",
+    )
     p_import.set_defaults(func=cmd_import)
 
     p_review = sub.add_parser("review", help="list open review flags, or resolve one")

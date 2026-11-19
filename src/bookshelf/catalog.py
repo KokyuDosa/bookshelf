@@ -33,7 +33,8 @@ class NewBook:
     pages: int | None = None
     format: str | None = None
     language: str | None = None
-    series: str | None = None
+    line: str | None = None  # product line, e.g. "DND 3.5": groups books, no order
+    series: str | None = None  # numbered series, e.g. "Happiness": series_index is the volume
     series_index: float | None = None
     copies: int = 1
     shelf: str | None = None
@@ -88,6 +89,17 @@ def get_or_create_author(conn: sqlite3.Connection, raw_name: str) -> int:
     return conn.execute("SELECT author_id FROM authors WHERE match_key = ?", (key,)).fetchone()[0]
 
 
+def get_or_create_line(conn: sqlite3.Connection, name: str) -> int:
+    key = title_key(name)
+    conn.execute(
+        "INSERT INTO product_lines (name, name_key) VALUES (?, ?) ON CONFLICT (name_key) DO NOTHING",
+        (" ".join(name.split()), key),
+    )
+    return conn.execute("SELECT line_id FROM product_lines WHERE name_key = ?", (key,)).fetchone()[
+        0
+    ]
+
+
 def get_or_create_series(conn: sqlite3.Connection, name: str) -> int:
     key = title_key(name)
     conn.execute(
@@ -116,21 +128,23 @@ def _first_author_sort_name(credits: list[Credit]) -> str | None:
 
 def book_natural_key(
     title: str,
+    line: str | None,
     series: str | None,
     volume: float | None,
     first_author_sort_name: str | None,
     pub_year: int | None,
 ) -> str:
-    """Series and volume are part of a book's identity: "DND 3.5" + "Monster Manual" is not
-    "Pathfinder" + "Monster Manual", and "Happiness" vol. 3 is not "Happiness" vol. 4."""
+    """Line, series and volume are part of a book's identity: "DND 3.5" + "Monster Manual" is
+    not "Pathfinder" + "Monster Manual", and "Happiness" vol. 3 is not "Happiness" vol. 4."""
     vol = f"vol {volume:g}" if volume is not None else None
-    full_title = " ".join(p for p in (series, vol, title) if p)
+    full_title = " ".join(p for p in (line, series, vol, title) if p)
     return natural_key(full_title, first_author_sort_name, pub_year)
 
 
 def find_by_natural_key(conn: sqlite3.Connection, book: NewBook) -> list[int]:
     key = book_natural_key(
         book.title,
+        book.line,
         book.series,
         book.series_index,
         _first_author_sort_name(book.credits),
@@ -158,9 +172,10 @@ def _add_tags(conn: sqlite3.Connection, book_id: int, tags: list[str]) -> None:
 
 def refresh_keys(conn: sqlite3.Connection, book_id: int) -> None:
     """Recompute sort_title, title_key and natural_key from the row as it stands now."""
-    title, series, volume, year = conn.execute(
-        "SELECT b.title, s.name, b.series_index, b.pub_year FROM books b "
-        "LEFT JOIN series s USING (series_id) WHERE b.book_id = ?",
+    title, line, series, volume, year = conn.execute(
+        "SELECT b.title, pl.name, s.name, b.series_index, b.pub_year FROM books b "
+        "LEFT JOIN series s USING (series_id) LEFT JOIN product_lines pl USING (line_id) "
+        "WHERE b.book_id = ?",
         (book_id,),
     ).fetchone()
     first = conn.execute(
@@ -173,7 +188,7 @@ def refresh_keys(conn: sqlite3.Connection, book_id: int) -> None:
         (
             sort_title(title),
             title_key(title),
-            book_natural_key(title, series, volume, first[0] if first else None, year),
+            book_natural_key(title, line, series, volume, first[0] if first else None, year),
             book_id,
         ),
     )
@@ -200,11 +215,13 @@ def add_book(conn: sqlite3.Connection, book: NewBook) -> int:
     """Insert one book and everything hanging off it. The caller owns the transaction."""
     isbn13 = to_isbn13(book.isbn) if book.isbn else None
     series_id = get_or_create_series(conn, book.series) if book.series else None
-    columns = ["title", "isbn13", "series_id", "is_public", *PLAIN_COLUMNS]
+    line_id = get_or_create_line(conn, book.line) if book.line else None
+    columns = ["title", "isbn13", "series_id", "line_id", "is_public", *PLAIN_COLUMNS]
     values = [
         " ".join(book.title.split()),
         isbn13,
         series_id,
+        line_id,
         int(book.is_public),
         *(getattr(book, c) for c in PLAIN_COLUMNS),
     ]
@@ -259,6 +276,8 @@ def update_book(
         supplied["isbn13"] = to_isbn13(book.isbn)
     if book.series:
         supplied["series_id"] = get_or_create_series(conn, book.series)
+    if book.line:
+        supplied["line_id"] = get_or_create_line(conn, book.line)
     if mode == "overwrite":
         supplied["title"] = " ".join(book.title.split())
         sets = [f"{c} = ?" for c in supplied]

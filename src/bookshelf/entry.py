@@ -22,8 +22,9 @@ def lookup_code(conn: sqlite3.Connection, kind: str, value: str) -> str:
 
 def find_owned(conn: sqlite3.Connection, isbn13: str) -> sqlite3.Row | None:
     return conn.execute(
-        "SELECT b.book_id, b.title, b.copies, s.name AS series, b.series_index FROM active_books b "
-        "LEFT JOIN series s USING (series_id) WHERE b.isbn13 = ?",
+        "SELECT b.book_id, b.title, b.copies, pl.name AS line, s.name AS series, b.series_index "
+        "FROM active_books b LEFT JOIN series s USING (series_id) "
+        "LEFT JOIN product_lines pl USING (line_id) WHERE b.isbn13 = ?",
         (isbn13,),
     ).fetchone()
 

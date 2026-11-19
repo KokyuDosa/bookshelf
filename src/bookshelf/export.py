@@ -17,6 +17,7 @@ PUBLIC_FIELDS = (
     "id",
     "title",
     "subtitle",
+    "line",
     "series",
     "volume",
     "authors",
@@ -32,24 +33,31 @@ PUBLIC_FIELDS = (
 )
 
 BOOKS_SQL = """
-SELECT b.book_id, b.title, b.subtitle, s.name AS series, b.series_index, b.edition,
+SELECT b.book_id, b.title, b.subtitle, pl.name AS line, s.name AS series, b.series_index, b.edition,
        f.label AS format, b.publisher, b.pub_year, b.isbn13, b.copies, b.cover_url,
        b.sort_title, b.updated_at
 FROM active_books b
 LEFT JOIN series s ON s.series_id = b.series_id
+LEFT JOIN product_lines pl ON pl.line_id = b.line_id
 LEFT JOIN formats f ON f.format = b.format
 WHERE b.is_public = 1 OR :include_hidden
 """
 
 
 def search_key(
-    title: str, subtitle: str | None, series: str | None, volume: float | None, authors: list[str]
+    title: str,
+    subtitle: str | None,
+    line: str | None,
+    series: str | None,
+    volume: float | None,
+    authors: list[str],
 ) -> str:
-    """The text a search matches against: normalised title, subtitle, series, "vol N" and authors,
+    """The text a search matches against: normalised title, subtitle, line, series, "vol N" and
+    authors,
     so "happiness 7" and "happiness vol 7" both find volume 7.
     The website's search.js normalises typed text the same way (tests/fixtures holds the cases)."""
     vol = f"vol {volume:g}" if volume is not None else None
-    return normalize_text(" ".join(p for p in (title, subtitle, series, vol, *authors) if p))
+    return normalize_text(" ".join(p for p in (title, subtitle, line, series, vol, *authors) if p))
 
 
 def _volume(index: float | None) -> int | float | None:
@@ -79,6 +87,7 @@ def public_books(conn: sqlite3.Connection, include_hidden: bool = False) -> list
             book_id,
             title,
             subtitle,
+            line,
             series,
             index,
             edition,
@@ -96,6 +105,7 @@ def public_books(conn: sqlite3.Connection, include_hidden: bool = False) -> list
             "id": book_id,
             "title": title,
             "subtitle": subtitle,
+            "line": line,
             "series": series,
             "volume": _volume(index),
             "authors": authors,
@@ -107,7 +117,7 @@ def public_books(conn: sqlite3.Connection, include_hidden: bool = False) -> list
             "copies": copies,
             "tags": tags.get(book_id, []),
             "cover": cover,
-            "key": search_key(title, subtitle, series, index, authors),
+            "key": search_key(title, subtitle, line, series, index, authors),
         }
         books.append({k: v for k, v in book.items() if v not in (None, [])})
     assert all(set(b) <= set(PUBLIC_FIELDS) for b in books)
@@ -131,11 +141,12 @@ def books_json(conn: sqlite3.Connection) -> str:
 
 
 def books_csv(conn: sqlite3.Connection) -> str:
-    """A spreadsheet-friendly list for friends, sorted by series then title."""
+    """A spreadsheet-friendly list for friends, sorted by line, series, volume, then title."""
     out = io.StringIO()
     writer = csv.writer(out, lineterminator="\n")
     writer.writerow(
         [
+            "Line",
             "Title",
             "Subtitle",
             "Series",
@@ -151,10 +162,18 @@ def books_csv(conn: sqlite3.Connection) -> str:
         ]
     )
     rows = public_books(conn)
-    rows.sort(key=lambda b: (normalize_text(b.get("series", "")), b.get("volume", 0), b["key"]))
+    rows.sort(
+        key=lambda b: (
+            normalize_text(b.get("line", "")),
+            normalize_text(b.get("series", "")),
+            b.get("volume", 0),
+            b["key"],
+        )
+    )
     for b in rows:
         writer.writerow(
             [
+                b.get("line", ""),
                 b["title"],
                 b.get("subtitle", ""),
                 b.get("series", ""),
