@@ -1,7 +1,9 @@
 // Run by tests/test_site_js.py: node tests/js/search.test.mjs <cases.json>
 // The cases file holds {"normalize": [[input, expected], ...]} computed by the Python code.
 import { readFileSync } from "node:fs";
-import { normalizeText, prepare, search, toIsbn13, looksLikeIsbn, compareBooks } from "../../site/search.js";
+import {
+  normalizeText, prepare, search, toIsbn13, looksLikeIsbn, compareBooks, canonicalBarcode, cleanScan,
+} from "../../site/search.js";
 
 const failures = [];
 const check = (label, actual, expected) => {
@@ -42,6 +44,22 @@ check("browse order", [...books].sort(compareBooks).map(b => b.id), [6, 2, 3, 7,
 check("volume number", ids(search(books, "happiness 7")), [8]);
 check("vol word", ids(search(books, "happiness vol 7")), [8]);
 check("whole series", ids(search(books, "happiness")), [7, 8]);
+
+// Barcodes that aren't ISBNs: the same cases as tests/test_scan.py
+for (const [typed, want] of [
+  ["070004004007", "0070004004007"], ["0070004004007", "0070004004007"], ["96385074", "96385074"],
+  ["9780786928866", "9780786928866"], ["070004004001", null], ["1234", null], ["hello", null],
+]) check(`canonicalBarcode(${typed})`, canonicalBarcode(typed), want);
+check("price add-on", cleanScan("9780786928866 51995"), "9780786928866");
+check("upc add-on", cleanScan("07000400400712"), "070004004007");
+const shelf = prepare([{ id: 1, title: "Feng Shui", barcode: "0070004004007", key: "feng shui" },
+                       { id: 2, title: "Player's Handbook", isbn: "9780786928866", key: "players handbook" }]);
+for (const typed of ["070004004007", "0070004004007", "07000400400712"]) {
+  const r = search(shelf, typed);
+  check(`barcode ${typed}`, [r.mode, ids(r)], ["barcode", [1]]);
+}
+check("isbn with add-on", ids(search(shelf, "9780786928866 51995")), [2]);
+check("bad upc is just digits", search(shelf, "070004004001").mode, "text");
 
 if (failures.length) {
   console.error(failures.slice(0, 20).join("\n"));

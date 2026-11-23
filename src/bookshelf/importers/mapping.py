@@ -7,7 +7,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from bookshelf.catalog import Credit, NewBook
-from bookshelf.isbn import InvalidISBN, to_isbn13
+from bookshelf.isbn import InvalidISBN, canonical_barcode, to_isbn13
 from bookshelf.normalize import normalize_text
 
 ORDINALS = {
@@ -380,7 +380,10 @@ def map_row(raw: dict[str, str], m: Mapping) -> MappedRow:
         try:
             book.isbn = to_isbn13(isbn)
         except InvalidISBN as exc:
-            flags.append(("invalid_isbn", f"barcode {isbn!r} is not an ISBN ({exc.reason})"))
+            if code := canonical_barcode(isbn):
+                book.barcode = code  # a UPC or store code: kept, so a scan finds the book
+            else:
+                flags.append(("invalid_isbn", f"barcode {isbn!r} is not an ISBN ({exc.reason})"))
     elif parts.isbn:
         book.isbn = parts.isbn
 

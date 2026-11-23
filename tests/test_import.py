@@ -55,7 +55,7 @@ BOOKS = [
         "item_id": "B",
         "title": "Feng Shui",
         "author": "Robin D. Laws",
-        "item_barcode": "700040040003",
+        "item_barcode": "700040040004",  # neither an ISBN nor a UPC (bad check digit)
     },
     {
         "item_id": "C",

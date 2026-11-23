@@ -122,7 +122,7 @@ def test_map_full_row():
 def test_bad_optional_values_become_flags_not_rejections():
     mapped = map_row(
         row(
-            title="Feng Shui", item_barcode="700040040003", quality="48", pages="many", price="lots"
+            title="Feng Shui", item_barcode="700040040004", quality="48", pages="many", price="lots"
         ),
         MAPPING,
     )
@@ -133,6 +133,12 @@ def test_bad_optional_values_become_flags_not_rejections():
         "bad_value",
         "bad_value",
     ]
+
+
+def test_upc_barcode_is_kept_not_flagged():
+    """Feng Shui's real cover code is a UPC: kept as the barcode, so a scan finds the book."""
+    mapped = map_row(row(title="Feng Shui", item_barcode="700040040003"), MAPPING)
+    assert (mapped.book.isbn, mapped.book.barcode, mapped.flags) == (None, "0700040040003", [])
 
 
 @pytest.mark.parametrize("cells", [{"item_id": "", "title": "X"}, {"title": "  "}, {"title": "?!"}])

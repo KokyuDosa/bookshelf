@@ -26,6 +26,7 @@ PUBLIC_FIELDS = (
     "publisher",
     "year",
     "isbn",
+    "barcode",
     "copies",
     "tags",
     "contents",
@@ -35,7 +36,8 @@ PUBLIC_FIELDS = (
 
 BOOKS_SQL = """
 SELECT b.book_id, b.title, b.subtitle, pl.name AS line, s.name AS series, b.series_index, b.edition,
-       f.label AS format, b.publisher, b.pub_year, b.isbn13, b.copies, b.cover_url,
+       f.label AS format, b.publisher, b.pub_year, b.isbn13, b.barcode, b.copies,
+       b.cover_url,
        b.sort_title, b.updated_at
 FROM active_books b
 LEFT JOIN series s ON s.series_id = b.series_id
@@ -104,6 +106,7 @@ def public_books(conn: sqlite3.Connection, include_hidden: bool = False) -> list
             publisher,
             year,
             isbn,
+            barcode,
             copies,
             cover,
             _sort,
@@ -123,6 +126,7 @@ def public_books(conn: sqlite3.Connection, include_hidden: bool = False) -> list
             "publisher": publisher,
             "year": year,
             "isbn": isbn,
+            "barcode": barcode,
             "copies": copies,
             "tags": tags.get(book_id, []),
             "contents": contents.get(book_id, []),

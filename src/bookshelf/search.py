@@ -2,15 +2,16 @@
 
 from dataclasses import dataclass, field
 
-from bookshelf.isbn import InvalidISBN, looks_like_isbn, to_isbn13
+from bookshelf.isbn import InvalidISBN, canonical_barcode, looks_like_isbn, to_isbn13
 from bookshelf.normalize import normalize_text
 
 
 @dataclass
 class Result:
-    mode: str  # "empty", "isbn", "bad-isbn" or "text"
+    mode: str  # "empty", "isbn", "barcode", "bad-isbn" or "text"
     books: list[dict] = field(default_factory=list)
     isbn: str | None = None
+    barcode: str | None = None
 
 
 def _score(book: dict, tokens: list[str], phrase: str) -> int:
@@ -31,12 +32,17 @@ def search(books: list[dict], query: str) -> Result:
     raw = query.strip()
     if not raw:
         return Result("empty")
-    if looks_like_isbn(raw):
-        try:
-            isbn = to_isbn13(raw)
-        except InvalidISBN:
-            return Result("bad-isbn")
+    code = canonical_barcode(raw)  # also drops a scanned price add-on
+    try:
+        isbn = to_isbn13(code if code and code[:3] in ("978", "979") else raw)
+    except InvalidISBN:
+        isbn = None
+    if isbn:
         return Result("isbn", [b for b in books if b.get("isbn") == isbn], isbn)
+    if code:  # a UPC or store code
+        return Result("barcode", [b for b in books if b.get("barcode") == code], barcode=code)
+    if looks_like_isbn(raw):
+        return Result("bad-isbn")
     phrase = normalize_text(raw)
     tokens = phrase.split()
     if not tokens:

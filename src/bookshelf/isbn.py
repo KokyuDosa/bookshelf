@@ -99,3 +99,38 @@ def looks_like_isbn(text: str) -> bool:
     if len(s) == 10:
         return set(s[:9]) <= DIGITS and (s[9] in DIGITS or s[9] == "X")
     return False
+
+
+# ---------------------------------------------------------------- other barcodes
+
+
+def _gtin_ok(digits: str) -> bool:
+    """The GS1 mod-10 check used by EAN-13, UPC-A and EAN-8 (and ISBN-13)."""
+    body, check = digits[:-1], int(digits[-1])
+    total = sum(int(d) * (3 if i % 2 == 0 else 1) for i, d in enumerate(reversed(body)))
+    return (10 - total % 10) % 10 == check
+
+
+def clean_scan(text: str) -> str:
+    """What a scanner typed, minus spacing and a price add-on.
+
+    Book barcodes often carry a 5-digit price add-on (or 2 digits on magazines), and some
+    scanners append it: "9780786928866 51995" -> "9780786928866".
+    """
+    s = "".join(c for c in text if not c.isspace() and c not in "-–")
+    if s.isdigit():
+        for main in (13, 12):
+            if len(s) in (main + 2, main + 5) and _gtin_ok(s[:main]):
+                return s[:main]
+    return s
+
+
+def canonical_barcode(text: str) -> str | None:
+    """A valid EAN-13, UPC-A or EAN-8 as stored: UPC-A gets a leading 0 (it *is* an EAN-13
+    starting with 0), so "012345678905" and "0012345678905" are the same barcode.
+    None for anything else. An ISBN-13 passes too; callers check for an ISBN first."""
+    s = clean_scan(text)
+    if not s.isdigit() or len(s) not in (8, 12, 13):
+        return None
+    code = "0" + s if len(s) == 12 else s
+    return code if _gtin_ok(code) else None

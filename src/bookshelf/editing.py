@@ -17,7 +17,7 @@ from bookshelf.catalog import (
     write_parts,
 )
 from bookshelf.export import public_books
-from bookshelf.isbn import InvalidISBN, looks_like_isbn, to_isbn10, to_isbn13
+from bookshelf.isbn import InvalidISBN, canonical_barcode, looks_like_isbn, to_isbn10, to_isbn13
 from bookshelf.normalize import normalize_text
 from bookshelf.search import describe, search
 
@@ -94,6 +94,7 @@ def details(conn: sqlite3.Connection, book_id: int) -> dict:
         "format": b["format"],
         "isbn13": b["isbn13"],
         "isbn10": isbn10,
+        "barcode": b["barcode"],
         "publisher": b["publisher"],
         "year": b["pub_year"],
         "pages": b["pages"],
@@ -154,6 +155,7 @@ def flatten(d: dict) -> dict[str, str | None]:
         "edition": d["edition"],
         "format": d["format"],
         "isbn": d["isbn13"],
+        "barcode": d["barcode"],
         "publisher": d["publisher"],
         "year": None if d["year"] is None else str(d["year"]),
         "pages": None if d["pages"] is None else str(d["pages"]),
@@ -189,6 +191,7 @@ SECTIONS = {
         "edition",
         "format",
         "isbn",
+        "barcode",
         "publisher",
         "year",
         "pages",
@@ -247,6 +250,7 @@ BOOK_COLUMNS = {  # option name -> books column
     "title": "title",
     "subtitle": "subtitle",
     "isbn": "isbn13",
+    "barcode": "barcode",
     "publisher": "publisher",
     "year": "pub_year",
     "edition": "edition",
@@ -293,6 +297,7 @@ class Edit:
     found_parts: list[int] = field(default_factory=list)
     remove_on: str | None = None
     restore: bool = False
+    public: bool | None = None  # True: on the website, False: hidden, None: unchanged
 
     def is_empty(self) -> bool:
         return not (
@@ -310,6 +315,7 @@ class Edit:
             or self.missing_parts
             or self.found_parts
             or self.remove_on
+            or self.public is not None
             or self.restore
         )
 
@@ -358,6 +364,16 @@ def apply_edit(conn: sqlite3.Connection, book_id: int, e: Edit) -> None:
         ).fetchone()
         if other:
             raise ValueError(f"book {other[0]} ({other[1]}) already has ISBN {sets['isbn']}")
+    if "barcode" in sets:
+        raw = str(sets["barcode"])
+        code = canonical_barcode(raw)
+        if code is None:
+            raise ValueError(
+                f"{raw!r} isn't a UPC or EAN barcode (8, 12 or 13 digits, check digit)"
+            )
+        if code[:3] in ("978", "979"):
+            raise ValueError(f"{raw!r} is an ISBN; use --isbn for it")
+        sets["barcode"] = code
     if "acquired" in sets:
         sets["acquired"] = _check_date("--acquired", str(sets["acquired"]))
     if "title" in sets and not normalize_text(str(sets["title"])):
@@ -396,6 +412,8 @@ def apply_edit(conn: sqlite3.Connection, book_id: int, e: Edit) -> None:
         columns["removed_on"] = _check_date("--remove", e.remove_on)
     if e.restore:
         columns["removed_on"] = None
+    if e.public is not None:
+        columns["is_public"] = int(e.public)
     if columns:
         conn.execute(
             f"UPDATE books SET {', '.join(f'{c} = ?' for c in columns)} WHERE book_id = ?",

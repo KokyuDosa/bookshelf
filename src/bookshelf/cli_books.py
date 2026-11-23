@@ -34,10 +34,11 @@ from bookshelf.editing import (
 from bookshelf.entry import enrich, find_owned, lookup_code
 from bookshelf.export import public_books, write_export
 from bookshelf.importers.mapping import normalize_edition, parse_money_cents
-from bookshelf.isbn import InvalidISBN, to_isbn13
+from bookshelf.isbn import InvalidISBN, canonical_barcode, to_isbn13
 from bookshelf.openlibrary import LookupFailed, OpenLibrary
 from bookshelf.paths import PROJECT_ROOT
 from bookshelf.publish import PublishError, publish
+from bookshelf.scan import Defaults, Session
 from bookshelf.search import describe, search
 
 SITE_DATA = PROJECT_ROOT / "site" / "data"
@@ -97,6 +98,15 @@ def cmd_add(args: argparse.Namespace) -> int:
         return _add(conn, args)
 
 
+def _barcode_arg(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    code = canonical_barcode(raw)
+    if code is None or code[:3] in ("978", "979"):
+        raise ValueError(f"--barcode {raw!r} isn't a UPC or EAN barcode (an ISBN goes first)")
+    return code
+
+
 def _add(conn: sqlite3.Connection, args: argparse.Namespace) -> int:
     isbn13 = None
     if args.isbn:
@@ -144,6 +154,7 @@ def _add(conn: sqlite3.Connection, args: argparse.Namespace) -> int:
             subtitle=args.subtitle or (found.subtitle if found else None),
             credits=credits,
             isbn=isbn13,
+            barcode=_barcode_arg(args.barcode),
             publisher=args.publisher or (found.publisher if found else None),
             pub_year=args.year or (found.pub_year if found else None),
             pages=args.pages or (found.pages if found else None),
@@ -210,6 +221,35 @@ def _add(conn: sqlite3.Connection, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_scan(args: argparse.Namespace) -> int:
+    conn = open_db(args.db)
+    if conn is None:
+        return 1
+    with closing(conn):
+        try:
+            defaults = Defaults(
+                shelf=args.shelf,
+                tags=args.tag or [],
+                line=args.line,
+                condition=lookup_code(conn, "condition", args.condition)
+                if args.condition
+                else None,
+                format=lookup_code(conn, "format", args.format) if args.format else None,
+                hidden=args.hidden,
+            )
+        except ValueError as exc:
+            return fail(str(exc))
+        lookup = None if args.offline else OpenLibrary(conn).lookup
+        session = Session(conn, lookup, input, defaults=defaults, bell=not args.quiet)
+        counts = session.run()
+    if counts.added or counts.copies:
+        tip = "Run 'bookshelf publish' to update the website."
+        if counts.later:
+            tip = "'bookshelf review' lists the books to fill in. " + tip
+        print(tip)
+    return 0
+
+
 # ---------------------------------------------------------------- show and edit
 
 
@@ -261,6 +301,7 @@ def build_edit(conn: sqlite3.Connection, args: argparse.Namespace) -> Edit:
         "title",
         "subtitle",
         "isbn",
+        "barcode",
         "publisher",
         "language",
         "shelf",
@@ -294,6 +335,9 @@ def build_edit(conn: sqlite3.Connection, args: argparse.Namespace) -> Edit:
     e.found_parts = getattr(args, "found_part", None) or []
     if set(e.missing_parts) & set(e.found_parts):
         raise ValueError("a part can't be both --missing-part and --found-part")
+    if args.hidden and args.public:
+        raise ValueError("give either --hidden or --public, not both")
+    e.public = False if args.hidden else True if args.public else None
     if args.remove and args.restore:
         raise ValueError("--remove and --restore can't be used together")
     return e
@@ -437,9 +481,14 @@ def cmd_search(args: argparse.Namespace) -> int:
     if result.mode == "bad-isbn":
         return fail("That isn't a valid ISBN: the check digit doesn't match.", 2)
     if not result.books:
-        print(
-            "Not in the collection." + (f" No book has ISBN {result.isbn}." if result.isbn else "")
+        which = (
+            f" No book has ISBN {result.isbn}."
+            if result.isbn
+            else f" No book has barcode {result.barcode}."
+            if result.barcode
+            else ""
         )
+        print("Not in the collection." + which)
         return 1
     print(
         f"In the collection ({len(result.books)}):"
@@ -537,7 +586,7 @@ def add_change_options(p: argparse.ArgumentParser, many: bool) -> None:
     g = p.add_argument_group("changes") if many else p
     names = ["subtitle", "publisher", "edition", "language", "shelf", "notes"]
     if not many:
-        names[:0] = ["title", "isbn"]
+        names[:0] = ["title", "isbn", "barcode"]
     for name in names:
         g.add_argument(f"--{name}")
     g.add_argument(
@@ -599,12 +648,15 @@ def add_change_options(p: argparse.ArgumentParser, many: bool) -> None:
         help="mark as gone (given away, sold); kept in the database, off the website",
     )
     g.add_argument("--restore", action="store_true", help="undo --remove")
+    g.add_argument("--hidden", action="store_true", help="keep off the website (still yours)")
+    g.add_argument("--public", action="store_true", help="show on the website again")
     g.add_argument("--yes", "-y", action="store_true", help="save without asking to confirm")
 
 
 def register(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser("add", help="add a book by ISBN, or by hand")
     p.add_argument("isbn", nargs="?", help="ISBN-10 or ISBN-13, hyphens allowed")
+    p.add_argument("--barcode", help="a UPC or other barcode that isn't the ISBN")
     p.add_argument("--title")
     p.add_argument("--subtitle")
     add_credit_options(p, "credit a person")
@@ -642,6 +694,23 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("book", nargs="+", help="book number, ISBN, or words from the title")
     p.add_argument("--json", action="store_true", help="print as JSON")
     p.set_defaults(func=cmd_show)
+
+    p = sub.add_parser(
+        "scan",
+        help="add books with a barcode scanner, one after another",
+        description="Scan barcodes (or type ISBNs) one after another; each new book is saved "
+        "straight away. u undoes the last one, + counts another copy of the book just "
+        "scanned, q finishes. The options apply to every book added in this session.",
+    )
+    p.add_argument("--shelf", help="e.g. 'Office 3', for every book scanned")
+    p.add_argument("--tag", action="append", help="genre or label; repeat for several")
+    p.add_argument("--line", help="product line for every book, e.g. 'DND 3.5'")
+    p.add_argument("--condition", help="mint, like new, excellent, very good, good, fair, poor")
+    p.add_argument("--format", help="hardcover, paperback, box set, …")
+    p.add_argument("--hidden", action="store_true", help="keep these books off the website")
+    p.add_argument("--offline", action="store_true", help="don't look books up on Open Library")
+    p.add_argument("--quiet", action="store_true", help="no beep for problems")
+    p.set_defaults(func=cmd_scan)
 
     p = sub.add_parser("edit", help="change or clear any value of one book")
     p.add_argument("book", help="book number, ISBN, or words from the title (quote several words)")

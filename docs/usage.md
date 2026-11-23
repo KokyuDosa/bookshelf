@@ -22,6 +22,7 @@ bookshelf publish
 | To | Run |
 | --- | --- |
 | Check whether you own something | `bookshelf search hollow earth` or `bookshelf search 978-1-4243-0829-3` |
+| Add a stack of books with a barcode scanner | `bookshelf scan` (see below) |
 | Add a book by its barcode number | `bookshelf add 9781421534466` |
 | Add a game book | `bookshelf add 9780786928866 --line "DND 3.5"` |
 | Add a manga volume | `bookshelf add 9781421534466 --series "One Piece" --volume 52 --tag Manga` |
@@ -40,6 +41,55 @@ bookshelf publish
 | Import a CSV export (another MyStuff2 category, say) | `bookshelf import data\imports\Manga.csv --dry-run`, then without `--dry-run` (see below) |
 | See what needs attention | `bookshelf review`, then `bookshelf review --resolve 1 ignored` |
 | Update the website | `bookshelf publish` |
+
+## Scanning barcodes
+
+A USB barcode scanner types the code and presses Enter, like a keyboard, so `bookshelf scan`
+turns the terminal into a scanning station: scan one book after another, and each new book is
+saved straight away.
+
+```powershell
+bookshelf scan
+bookshelf scan --shelf "Office 3" --tag Philosophy     # applied to every book this session
+```
+
+```
+scan> 9780786928866
+  Added #240  Player's Handbook — Jonathan Tweet, Monte Cook, Skip Williams — 2003
+scan> 9781568823348
+  Already have #14 Call of Cthulhu; Malleus Monstrorum (1 copy). Type + if this is another copy.
+scan> q
+Done: added 1, 1 you already had.
+```
+
+While scanning, type:
+
+| Type | To |
+| --- | --- |
+| `u` | undo the last thing saved (a book, a copy or a barcode); repeat to go further back |
+| `+` | count another copy of the book just scanned |
+| `?` | list these commands |
+| `q` (or Ctrl+C) | finish; it prints what the session did |
+
+- **Details** come from Open Library. When it doesn't know a book, you're asked for the title
+  and authors. Press Enter on the title to save the book for later instead: it's saved hidden
+  from the website as "ISBN 978…", with a `needs_details` flag in `bookshelf review`. Fill it
+  in with `bookshelf edit <number> --title "…" --author "…" --public`.
+- **Barcodes that aren't ISBNs** (the UPC on an older paperback's cover, a store code on a game
+  book): you're asked for the ISBN from the copyright page, or the title. Either way the barcode
+  is saved on the book, so scanning it again (here, or typing it into the website's search)
+  finds it. A UPC scanned for a book you already have is added to that book.
+- **Price add-ons** (the small extra barcode on many covers) are ignored if your scanner
+  sends them.
+- **Problems beep** (an unknown book, one you already have, a bad code); `--quiet` turns that off.
+- If Open Library can't be reached, the session carries on without it and asks for titles.
+  `--offline` does that from the start.
+- Options: `--shelf`, `--tag` (repeatable), `--line`, `--condition`, `--format`, `--hidden`.
+
+**Setting up the scanner:** plug it in and scan into Notepad first. It should type the digits
+and start a new line. If it doesn't press Enter after each code, turn on its "Enter suffix" (or
+"CR suffix") by scanning the setup barcode in its manual. Keep the terminal window in front
+while scanning.
 
 ## Importing a CSV export
 
@@ -61,7 +111,7 @@ Keep export files in `data\imports\`: that folder is private and never reaches G
 3. **Import for real** with the same command without `--dry-run`. A backup of your database
    is written to `data\backups\` first.
 4. **Deal with what's left over.**
-   - `bookshelf review` lists flagged books: a barcode that isn't an ISBN, a condition word
+   - `bookshelf review` lists flagged books: a barcode that's neither an ISBN nor a UPC, a condition word
      the mapping doesn't know, a value that isn't a number, or a possible duplicate. Fix the book
      with `bookshelf edit`, then close the flag with `bookshelf review --resolve <number> ignored`
      (or `distinct` / `merged` for duplicates).
@@ -202,6 +252,8 @@ not `#56`: a `#` starts a comment there.
 | Empty any field | `--clear FIELD` (repeatable): isbn, line, series, volume, authors, tags, parts, value, loan, … |
 | Gave it away or sold it | `bookshelf edit 56 --remove` (today) or `--remove 2026-11-17` |
 | Changed your mind | `bookshelf edit 56 --restore` |
+| Store a cover UPC (not the ISBN) | `bookshelf edit 56 --barcode 070004004007` |
+| Hide it from the website, or show it again | `bookshelf edit 56 --hidden`, `bookshelf edit 56 --public` |
 
 `edit` prints each change as `old -> new` and asks before saving (`--yes` skips the question).
 Anything it refuses changes nothing. Clears happen before sets, so `--clear series --series X`
@@ -305,7 +357,8 @@ so scripts can use it.
 Title, subtitle, product line, series and volume, a set's contents, authors, edition, format, publisher, year, ISBN, number of
 copies, tags and the Open Library cover. Never: values, prices, notes, loans, shelf, condition,
 books added with `--hidden`, or books you've removed. Friends can download the same list as a
-CSV from the bottom of the page.
+CSV from the bottom of the page. The search box also takes an ISBN or a stored UPC, typed or
+pasted.
 
 The genre buttons under the search box show every genre with its number of books, most used
 first; tap one to show only that genre, tap it again to show everything. A search and a genre

@@ -83,6 +83,7 @@ class NewBook:
     credits: list[Credit] = field(default_factory=list)  # in credited order
     subtitle: str | None = None
     isbn: str | None = None  # any written form; stored as ISBN-13
+    barcode: str | None = None  # a UPC/EAN that isn't an ISBN, as canonical_barcode() gives it
     publisher: str | None = None
     pub_year: int | None = None
     edition: str | None = None
@@ -112,6 +113,7 @@ class NewBook:
 # books columns copied straight from NewBook attributes of the same name
 PLAIN_COLUMNS = (
     "subtitle",
+    "barcode",
     "publisher",
     "pub_year",
     "edition",

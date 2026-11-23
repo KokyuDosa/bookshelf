@@ -103,11 +103,13 @@ function run() {
   } else if (!result.results.length) {
     const detail = result.mode === "isbn"
       ? `No book with ISBN ${result.isbn}${where}.`
+      : result.mode === "barcode"
+      ? `No book with barcode ${result.barcode}${where}.`
       : `No title, line, series or author matches “${query.trim()}”${where}.`;
     setStatus("miss", "Not in the collection", detail);
     render([]);
-  } else if (result.mode === "isbn") {
-    setStatus("hit", "In the collection", `ISBN ${result.isbn}`);
+  } else if (result.mode === "isbn" || result.mode === "barcode") {
+    setStatus("hit", "In the collection", result.isbn ? `ISBN ${result.isbn}` : `Barcode ${result.barcode}`);
     render(result.results);
   } else {
     setStatus("count", null, `${plural(result.results.length, "book")} match${result.results.length === 1 ? "es" : ""} “${query.trim()}”${where}`);

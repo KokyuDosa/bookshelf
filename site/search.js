@@ -57,6 +57,37 @@ export function toIsbn13(text) {
   return null;
 }
 
+// ---------------------------------------------------------------- other barcodes
+// The same rules as Python's isbn.clean_scan and canonical_barcode.
+
+function gtinOk(digits) {
+  let total = 0;
+  const body = digits.slice(0, -1);
+  for (let i = 0; i < body.length; i++) {
+    total += Number(body[body.length - 1 - i]) * (i % 2 === 0 ? 3 : 1);
+  }
+  return (10 - (total % 10)) % 10 === Number(digits[digits.length - 1]);
+}
+
+// What a scanner typed, minus spacing and a 2- or 5-digit price add-on.
+export function cleanScan(text) {
+  const s = text.replace(/[\s\-–]/g, "");
+  if (/^\d+$/.test(s)) {
+    for (const main of [13, 12]) {
+      if ((s.length === main + 2 || s.length === main + 5) && gtinOk(s.slice(0, main))) return s.slice(0, main);
+    }
+  }
+  return s;
+}
+
+// A valid EAN-13, UPC-A (stored with a leading 0) or EAN-8, else null.
+export function canonicalBarcode(text) {
+  const s = cleanScan(text);
+  if (!/^\d+$/.test(s) || ![8, 12, 13].includes(s.length)) return null;
+  const code = s.length === 12 ? "0" + s : s;
+  return gtinOk(code) ? code : null;
+}
+
 // ---------------------------------------------------------------- search
 
 // Each word of the query must be the start of some word in the book's key, so
@@ -98,11 +129,11 @@ function score(book, tokens, phrase) {
 export function search(books, query) {
   const raw = query.trim();
   if (!raw) return { mode: "empty", results: [] };
-  if (looksLikeIsbn(raw)) {
-    const isbn = toIsbn13(raw);
-    if (!isbn) return { mode: "bad-isbn", results: [] };
-    return { mode: "isbn", isbn, results: books.filter(b => b.isbn === isbn) };
-  }
+  const code = canonicalBarcode(raw); // also drops a scanned price add-on
+  const isbn = toIsbn13(code && /^97[89]/.test(code) ? code : raw);
+  if (isbn) return { mode: "isbn", isbn, results: books.filter(b => b.isbn === isbn) };
+  if (code) return { mode: "barcode", barcode: code, results: books.filter(b => b.barcode === code) };
+  if (looksLikeIsbn(raw)) return { mode: "bad-isbn", results: [] };
   const phrase = normalizeText(raw);
   const tokens = phrase.split(" ").filter(Boolean);
   if (!tokens.length) return { mode: "empty", results: [] };
