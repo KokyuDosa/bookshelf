@@ -1,52 +1,62 @@
 # Using bookshelf
 
-Run everything from the project folder in the VS Code terminal, with the virtual environment active.
-Your site's address will be **https://kokyudosa.github.io/bookshelf/** (repository name `bookshelf`).
+Run every command from the project folder in the VS Code terminal, with the virtual environment
+active: the prompt shows `(.venv)`, or run `.venv\Scripts\Activate.ps1`. Your website is
+**https://kokyudosa.github.io/bookshelf/**.
 
-## One-time website setup
+Every command explains its options with `--help`, for example `bookshelf edit --help`.
 
-1. On GitHub: repository **Settings → Pages → Build and deployment → Source: GitHub Actions**.
-2. Bring your database up to date and publish:
+- [Quick reference](#quick-reference)
+- [Finding books](#finding-books)
+- [Adding books](#adding-books): scanning, `add`
+- [Fixing books](#fixing-books): `show`, `edit`, lines, series and sets, `edit-many`, `review`
+- [Importing a CSV export](#importing-a-csv-export)
+- [The website](#the-website): `publish`, `export`
+- [Open Library](#open-library): `enrich`
+- [Upkeep](#upkeep): updating, backups, files, other commands, troubleshooting
 
-```powershell
-bookshelf migrate          # adds the Open Library cache table (schema version 2)
-bookshelf enrich           # optional: years, pages, publishers and covers for books with ISBNs
-bookshelf publish
-```
-
-3. Watch the **Actions** tab: the workflow runs the tests, then deploys. Open the address on your
-   phone and use **Add to Home Screen** so it opens like an app.
-
-## Everyday commands
+## Quick reference
 
 | To | Run |
 | --- | --- |
 | Check whether you own something | `bookshelf search hollow earth` or `bookshelf search 978-1-4243-0829-3` |
-| Add a stack of books with a barcode scanner | `bookshelf scan` (see below) |
-| Add a book by its barcode number | `bookshelf add 9781421534466` |
-| Add a game book | `bookshelf add 9780786928866 --line "DND 3.5"` |
-| Add a manga volume | `bookshelf add 9781421534466 --series "One Piece" --volume 52 --tag Manga` |
-| Add an omnibus | `bookshelf add --title "Berserk Deluxe Edition" --series "Berserk Deluxe" --volume 1 --edition Omnibus --format hardcover` |
+| See everything about one book | `bookshelf show 56` |
+| Add a stack of books with a barcode scanner | `bookshelf scan` |
+| Add one book by ISBN | `bookshelf add 9781421534466` |
 | Add a book with no ISBN | `bookshelf add --title "The Time Machine" --author "H. G. Wells" --year 1895` |
-| Add a translation or anthology | `--author`, `--translator`, `--editor`, `--illustrator`, in credit order |
-| See or fix one book | `bookshelf show 56`, `bookshelf edit 56 --clear isbn` (see below) |
-| Add a slipcase or boxed set | `bookshelf add 9781568823348 --format "box set" --part "Vol. 1" --part "Vol. 2" --part Slipcase` (see below) |
-| Change many books at once | `bookshelf edit-many --title-has "call of cthulhu" --line "Call of Cthulhu"` (see below) |
 | Count a second copy | `bookshelf add 9780786928866 --another-copy` |
-| Keep a book off the website | add `--hidden` |
-| Record its value (private) | add `--value 45.00` |
-| Fill in details from Open Library | `bookshelf enrich` (re-runs are free: answers are cached) |
-| Search a volume of a series | `bookshelf search happiness 7` or `happiness vol 7`; the website works the same way |
-| Recompute matching keys after an update changes the rules | `bookshelf rekey` |
-| Import a CSV export (another MyStuff2 category, say) | `bookshelf import data\imports\Manga.csv --dry-run`, then without `--dry-run` (see below) |
-| See what needs attention | `bookshelf review`, then `bookshelf review --resolve 1 ignored` |
+| Fix one book | `bookshelf edit 56 --year 2003`, `bookshelf edit 56 --clear isbn` |
+| Change many books at once | `bookshelf edit-many --title-has "call of cthulhu" --line "Call of Cthulhu"` |
+| See what needs attention | `bookshelf review` |
+| Import a MyStuff2 export | `bookshelf import data\imports\Manga.csv --dry-run`, then without `--dry-run` |
+| Fill in years, pages and covers | `bookshelf enrich` |
 | Update the website | `bookshelf publish` |
 
-## Scanning barcodes
+## Finding books
+
+```powershell
+bookshelf search hollow earth          # words from the title, subtitle, line, series, authors or a set's contents
+bookshelf search happiness 7           # volume 7 of a series ("happiness vol 7" works too)
+bookshelf search 0-7869-2886-0         # an ISBN-10 or ISBN-13, hyphens or not
+bookshelf search 070004004007          # a stored UPC or store code
+```
+
+- Every word you type must start a word of the book, so `hob tolk` finds *The Hobbit* by
+  Tolkien. Case and accents don't matter.
+- Results show each book's number, which `show` and `edit` use. At most 25 are listed;
+  `--limit 100` lists more.
+- Hidden books are included, but removed ones aren't.
+- The exit status is 0 when you own a match, 1 when you don't and 2 for an invalid ISBN, so
+  scripts can use it.
+- The website's search box follows the same rules.
+
+## Adding books
+
+### Scanning a stack
 
 A USB barcode scanner types the code and presses Enter, like a keyboard, so `bookshelf scan`
-turns the terminal into a scanning station: scan one book after another, and each new book is
-saved straight away.
+turns the terminal into a scanning station. Scan one book after another; each new book is saved
+straight away.
 
 ```powershell
 bookshelf scan
@@ -71,67 +81,233 @@ While scanning, type:
 | `?` | list these commands |
 | `q` (or Ctrl+C) | finish; it prints what the session did |
 
-- **Details** come from Open Library. When it doesn't know a book, you're asked for the title
-  and authors. Press Enter on the title to save the book for later instead: it's saved hidden
-  from the website as "ISBN 978…", with a `needs_details` flag in `bookshelf review`. Fill it
-  in with `bookshelf edit <number> --title "…" --author "…" --public`.
-- **Barcodes that aren't ISBNs** (the UPC on an older paperback's cover, a store code on a game
-  book): you're asked for the ISBN from the copyright page, or the title. Either way the barcode
-  is saved on the book, so scanning it again (here, or typing it into the website's search)
-  finds it. A UPC scanned for a book you already have is added to that book.
-- **Price add-ons** (the small extra barcode on many covers) are ignored if your scanner
+- **Details** come from Open Library.
+  - When Open Library doesn't know a book, you're asked for its title and authors.
+  - Press Enter on the title to save the book for later instead. It's saved as "ISBN 978…",
+    hidden from the website, with a `needs_details` flag in `bookshelf review`.
+  - Fill it in later with `bookshelf edit <number> --title "…" --author "…" --public`.
+- **Barcodes that aren't ISBNs** include the UPC on an older paperback's cover and a store code
+  on a game book.
+  - You're asked for the ISBN from the copyright page, or the title. Either way, the barcode is
+    saved on the book, so scanning it again finds the book.
+  - A UPC scanned for a book you already have is saved onto that book.
+- **Price add-ons** (the small extra barcode beside the main one) are ignored if your scanner
   sends them.
-- **Problems beep** (an unknown book, one you already have, a bad code); `--quiet` turns that off.
-- If Open Library can't be reached, the session carries on without it and asks for titles.
-  `--offline` does that from the start.
-- Options: `--shelf`, `--tag` (repeatable), `--line`, `--condition`, `--format`, `--hidden`.
+- **Problems beep**: an unknown book, one you already have, or a bad code. `--quiet` turns the
+  beep off.
+- **No connection?** If Open Library can't be reached, the session carries on without it and
+  asks for titles. `--offline` does that from the start.
+- **Options for the whole session:** `--shelf`, `--tag` (repeatable), `--line`, `--condition`,
+  `--format` and `--hidden`.
 
-**Setting up the scanner:** plug it in and scan into Notepad first. It should type the digits
-and start a new line. If it doesn't press Enter after each code, turn on its "Enter suffix" (or
-"CR suffix") by scanning the setup barcode in its manual. Keep the terminal window in front
-while scanning.
+**Setting up the scanner:**
+1. Plug it in and scan a book into Notepad. It should type the digits and start a new line.
+2. If it doesn't press Enter after each code, turn on its "Enter suffix" (or "CR suffix") by
+   scanning the setup barcode in its manual.
+3. Keep the terminal window in front while scanning.
+
+### One at a time: `add`
+
+```powershell
+bookshelf add 9780786928866 --line "DND 3.5"
+bookshelf add 9781421534466 --series "One Piece" --volume 52 --tag Manga
+bookshelf add --title "Berserk Deluxe Edition" --series "Berserk Deluxe" --volume 1 --edition Omnibus --format hardcover
+bookshelf add 9781568823348 --format "box set" --part "Vol. 1" --part "Vol. 2" --part Slipcase
+```
+
+With an ISBN, `add` asks Open Library for the details. Anything you give as an option wins over
+what it finds. It then shows the book and asks before saving.
+
+- If you already own the ISBN, it says so instead of adding a second copy. Add `--another-copy`
+  to count one more.
+- If the book looks like one you already have (same title, author and year), it warns you and
+  flags it for review.
+
+| Option | What it sets |
+| --- | --- |
+| `--title`, `--subtitle` | the title, if there's no ISBN or you want a different one |
+| `--author`, `--editor`, `--translator`, `--illustrator` | credits, in the order you give them; repeat each for several people |
+| `--line`, `--series`, `--volume` | product line, numbered series and volume number (see [Lines, series and sets](#lines-series-and-sets)) |
+| `--edition` | e.g. `2nd`, `Omnibus`, `Gold Edition` |
+| `--part` | a piece of a set, e.g. `"Vol. 1"`, `Slipcase`; repeat in order |
+| `--barcode` | a UPC or store code that isn't the ISBN |
+| `--publisher`, `--year`, `--pages` | publication details |
+| `--format` | hardcover, trade paperback, mass market, paperback, box set, ebook, audiobook, other |
+| `--condition` | mint, like new, excellent, very good, good, fair, poor |
+| `--copies`, `--shelf` | how many you own and where they live (the shelf is never published) |
+| `--tag` | a genre or label; repeat for several |
+| `--value` | estimated value, e.g. `45.00` (private) |
+| `--hidden` | keep it off the website |
+| `--another-copy` | if you already own this ISBN, count one more copy |
+| `--offline` | don't ask Open Library |
+| `--yes` | save without asking |
+
+## Fixing books
+
+### One book: `show` and `edit`
+
+Both take a book's number (from `search`), an ISBN in any form, or words from the title.
+For `edit`, put several words in quotes. In PowerShell, write `56` rather than `#56`, because
+`#` starts a comment.
+
+```powershell
+bookshelf show 56                # every stored value, private ones and review flags included
+bookshelf show 56 --json         # the same as JSON
+```
+
+| To | Run |
+| --- | --- |
+| Fix several things at once | `bookshelf edit 56 --year 2003 --publisher "Wizards of the Coast" --condition "very good"` |
+| Correct or remove the ISBN | `bookshelf edit 56 --isbn 0-7869-2893-X`, `bookshelf edit 56 --clear isbn` |
+| Store a cover UPC | `bookshelf edit 56 --barcode 070004004007` |
+| Replace the credits (order kept) | `bookshelf edit 56 --author "Skip Williams" --author "Jonathan Tweet" --editor "Kim Mohan"` |
+| Put into a line or series | `bookshelf edit 56 --line "DND 3.5"`, `bookshelf edit "berserk deluxe" --series "Berserk Deluxe" --volume 1` |
+| Cut a prefix off the title | `bookshelf edit 56 --trim-title "Call of Cthulhu:"` |
+| Tags | `bookshelf edit 56 --add-tag Classics --remove-tag TTRPG` |
+| What's in a set | `--add-part "Vol. 1"`, `--remove-part 3`, `--missing-part 3`, `--found-part 3` |
+| Private details | `--value 120`, `--price 45`, `--notes "Signed"`, `--loaned-to Sam --loaned-on 2026-11-01`, `--acquired 2024-06-01` |
+| Other details | `--subtitle`, `--edition`, `--format`, `--pages`, `--copies`, `--shelf`, `--language`, `--cover URL`, `--ol-key OL7353617M` |
+| Hide from the website, or show again | `--hidden`, `--public` |
+| Gave it away or sold it | `bookshelf edit 56 --remove` (today) or `--remove 2026-11-17` |
+| Changed your mind | `bookshelf edit 56 --restore` |
+| Empty a field | `--clear FIELD`, repeatable: `isbn`, `barcode`, `line`, `series`, `volume`, `authors`, `tags`, `parts`, `value`, `price`, `loan`, `notes`, `shelf`, … (`--help` lists them all) |
+
+- `edit` prints each change as `old -> new` and asks before saving; `--yes` skips the question.
+- If it refuses anything, nothing changes.
+- Clears happen before sets, so `--clear series --series X` moves a book in one go.
+- A removed book stays in the database with its history. It drops out of searches and the
+  website, and a re-import never adds it back.
+
+### Lines, series and sets
+
+- **Product line:** books that belong together without an order, such as "DND 3.5",
+  "Call of Cthulhu" or "Shadowrun 5E". Keep the edition in the name ("DND 3.5", not "DND"
+  plus an edition), because the website groups and sorts by the name.
+- **Series:** books in a numbered order, such as "Rise of the Runelords" 1 to 6 or "Happiness"
+  vol. 7. A volume number needs a series. A book can have both a line and a series (a
+  Pathfinder adventure path is in the line "Pathfinder" and in a series).
+- **Set:** a slipcase or boxed set with one ISBN is one book, because that's what you scan, buy,
+  sell and value. List what's inside it as **parts**, in order:
+
+  ```powershell
+  bookshelf edit 9781568823348 --title "Malleus Monstrorum" --format "box set" `
+      --add-part "Vol. 1: Monsters of the Mythos" --add-part "Vol. 2: Deities of the Mythos" `
+      --add-part Slipcase
+  ```
+
+  (A backtick at the end of a line continues a PowerShell command on the next line.)
+  - **Kinds:** each part has a kind (work, volume, booklet, handouts, map, screen, cards, dice,
+    slipcase, other), guessed from its name: "Vol. 2" is a volume, "Keeper Screen" a screen.
+    To choose the kind yourself, put it first with a colon: `--add-part "handouts: Keeper's materials"`.
+  - **Several works in one volume:** list each as a `work` part, so every title is searchable:
+    `--add-part "work: Human, All Too Human" --add-part "work: Beyond Good and Evil"`.
+  - **Numbers:** `show` numbers the parts 1, 2, 3…, and `--remove-part`, `--missing-part` and
+    `--found-part` use those numbers. Removing a part renumbers the ones after it.
+  - **Missing pieces:** these are private. The website lists what a set contains, not what you're
+    missing.
+  - **Separate books:** two books bought separately, each with its own ISBN, aren't a set. Give
+    them a series and volume numbers instead.
+
+### Many books: `edit-many`
+
+`edit-many` chooses books with filters, then makes the same change to each of them. It lists
+every change, asks once, and saves all of them or none. If one book refuses (say, a loan date
+without a borrower), nothing is saved and it tells you which book.
+
+```powershell
+# Every book with "Call of Cthulhu" in its title goes into that line and loses the prefix
+bookshelf edit-many --title-has "call of cthulhu" --line "Call of Cthulhu" --trim-title "Call of Cthulhu:" --dry-run
+```
+
+Choosing books (give at least one filter; when you give several, a book must match all of them):
+
+| Filter | Chooses |
+| --- | --- |
+| `--title-has WORDS` | these words, next to each other, in the title (whole words; case and accents ignored) |
+| `--match QUERY` | what `bookshelf search QUERY` finds |
+| `--in-line NAME`, `--in-series NAME` | books in that line or series |
+| `--has-tag TAG` | books with that tag; repeat to need several |
+| `--from-publisher NAME` | books from that publisher |
+| `--no-isbn` | books without an ISBN |
+| `--ids 3,5,9-12`, `--except 7,8` | those book numbers; leave these out |
+| `--all` | every book |
+| `--include-removed` | also books you've marked removed |
+
+- **Changes** are the same as `edit`'s, except the ones that belong to one book only: `--title`,
+  `--isbn`, `--barcode`, `--volume`, `--cover`, `--ol-key` and the part options.
+- **`--trim-title`** accepts any case, and `:`, `;`, `-` or a space after the prefix. A title
+  that would end up empty is left alone.
+- **Credit options** (`--author` and the others) replace the credits of every chosen book, so
+  use them with care.
+- **`--dry-run`** shows the changes and saves nothing. Without `--yes`, it asks before saving.
+- **`--show 500`** lists more changed books; only the first 50 are listed by default.
+- **Options can't be shortened** for `edit-many` (`--title` doesn't mean `--title-has`), so a typo
+  is an error rather than a different filter.
+
+### The review list: `review`
+
+Imports, `add` and `scan` flag books that need a look instead of guessing. `bookshelf review`
+lists the open flags with a number, the book and the reason:
+
+| Reason | Means |
+| --- | --- |
+| `possible_duplicate` | same line, series, volume, title, first author and year as another book |
+| `invalid_isbn` | the barcode cell was neither an ISBN nor a UPC; the book was imported without it |
+| `unknown_condition` | a condition word the mapping doesn't know |
+| `bad_value` | a number that isn't one: pages, value or volume |
+| `check_credits` | names were taken from the title ("… by Douglas R. Hofstadter"); check them |
+| `check_title` | the title may still contain names the importer couldn't separate |
+| `needs_details` | a scanned book saved for later; give it a title and `--public` |
+
+Fix the book with `edit` if needed, then close the flag with
+`bookshelf review --resolve <flag number> <how>`:
+
+| How | Use it when |
+| --- | --- |
+| `ignored` | you've dealt with it, or it's fine as it is (every reason except duplicates) |
+| `distinct` | the two books really are different, e.g. two editions |
+| `merged` | it was the same book twice and you've combined them |
+
+Closing a flag only records your answer; it changes no book. To merge two books, do it first:
+copy any missing details onto the one you keep, then `--copies 2` if you really own two, or
+`--remove` the duplicate. A closed flag stays closed, and a re-import doesn't raise it again.
+`show` lists a book's flags with how each was resolved.
 
 ## Importing a CSV export
 
-Use this for another MyStuff2 category, or for a fresh export of one you've already imported.
+Use this for a MyStuff2 category you haven't imported yet, or for a fresh export of one you have.
 Keep export files in `data\imports\`: that folder is private and never reaches GitHub.
 
 1. **Export from MyStuff2** with the same settings as before: header row on, comma delimiter,
-   double-quote text delimiter, `|` as the multi-value delimiter, media off. A single `.csv`,
-   a `.tsv`, or a `.zip` holding several category CSVs all work. Excel `.xlsx` files don't, so
-   export as CSV.
-2. **Try it first.** A dry run does everything except save, and reports what would happen:
+   double-quote text delimiter, `|` as the multi-value delimiter, media off. A `.csv`, a `.tsv`
+   or a `.zip` of several category CSVs all work. Excel `.xlsx` files don't, so export as CSV.
+2. **Try it first.** A dry run does everything except save:
 
    ```powershell
    bookshelf import data\imports\Manga.csv --dry-run
    ```
 
-   It prints rows read; how many books would be inserted, updated, left unchanged or rejected;
-   the books it would flag for review; and warnings such as a column missing from the file.
-3. **Import for real** with the same command without `--dry-run`. A backup of your database
-   is written to `data\backups\` first.
-4. **Deal with what's left over.**
-   - `bookshelf review` lists flagged books: a barcode that's neither an ISBN nor a UPC, a condition word
-     the mapping doesn't know, a value that isn't a number, or a possible duplicate. Fix the book
-     with `bookshelf edit`, then close the flag with `bookshelf review --resolve <number> ignored`
-     (or `distinct` / `merged` for duplicates).
-   - Rows that can't become a book at all (no item ID, no title) are listed with the reason in
-     `data\imports\rejects-<file>-<time>.csv`.
-5. **Fill in and publish:** `bookshelf enrich` for the new books with ISBNs, then
-   `bookshelf publish`.
+   It reports rows read, how many books would be inserted, updated, left unchanged or rejected,
+   the books it would flag for review, and warnings such as a missing column.
+3. **Import for real** with the same command without `--dry-run`. Your database is backed up to
+   `data\backups\` first.
+4. **Deal with what's left over.** Run `bookshelf review` (see [the review list](#the-review-list-review)).
+   Rows that can't become a book at all (no item ID, no title) are listed with the reason in
+   `data\imports\rejects-<file>-<time>.csv`.
+5. **Fill in and publish:** `bookshelf enrich`, then `bookshelf publish`.
 
 ### What the importer does with your rows
 
 - **Matching:** every row is matched by its MyStuff2 item ID, so importing the same file twice
-  never creates duplicates. Unchanged rows are skipped, so your `bookshelf edit` fixes stay. A
-  row you have *changed in MyStuff2* overwrites the fields it fills in (empty cells never erase
-  anything), so make fixes in bookshelf, not MyStuff2.
-- **What counts as changed:** only the columns the mapping reads (title, author, genre, price
-  and so on). Exporting with or without images, or a newer "item updated" time, changes
-  nothing. That makes it safe to import a full-collection export over a category you imported
-  before: the books already in the database are reported as unchanged.
-- **Books you already have:** a row whose ISBN you already own, for example one added by hand,
-  only fills that book's empty fields; it doesn't add a second copy of the book.
+  never creates duplicates. A row whose ISBN you already own (one you added by hand, say) only
+  fills that book's empty fields.
+- **Your fixes are kept:** unchanged rows are skipped, so changes made with `edit`, `edit-many`
+  or `scan` stay put.
+  - A row you've changed *in MyStuff2* overwrites the fields it fills. Empty cells never erase
+    anything, but make fixes in bookshelf, not MyStuff2.
+  - Only the columns the mapping reads count as changes. Exporting with or without images, or a
+    newer "item updated" time, changes nothing, so a full-collection export can go over
+    categories you've already imported.
 - **Titles:** store-listing extras are peeled off the end of a title:
 
   | In the title | Becomes |
@@ -141,56 +317,61 @@ Keep export files in `data\imports\`: that folder is private and never reaches G
   | `(Hardcover)`, `- Hardcover`, `Box Set` | the format |
   | `(Edition 2)`, `(2nd Edition)` | edition "2nd", if the edition cell is empty |
   | `(0786931345)` | the ISBN, if the barcode cell is empty and it's a valid ISBN |
-  | `by Douglas R. Hofstadter` | cut off; it becomes the author if the author cell is empty |
+  | `by Douglas R. Hofstadter` | cut off; becomes the author if the author cell is empty |
   | `Illustrated by Don Lawrence` | an illustrator credit (also "Translated by", "Edited by") |
   | `Prophet Volume 1: Remission` | series "Prophet", vol. 1, title "Remission" (also `Vol. IV`, `(Vol. 2: …)`) |
 
-  Each rule only removes text it recognises and never empties a title. A "by …" that isn't
-  plainly names ("by Jeff, McArtor, Mike") stays in the title; names taken from a title are
-  flagged as `check_credits` so you can check them in `bookshelf review`. The volume rule only
-  applies when there's no volume column or value. The settings are under `[title_rules]` in
-  the mapping file.
-- **Years:** a year in the edition cell becomes the book's year ("1st; 1973" is edition 1st,
-  year 1973; "October 1952" is year 1952), and so does one after the publisher ("MacMillan,
-  New York, 1968" is publisher MacMillan, year 1968).
-- **Roles:** in the author cell, `(ed.)`, `(trans.)` or `(ill.)` after a name sets the role, for
-  example `Fray Baroque (ed.)|Tegan Eanelli (ed.)`. Use it in corrections.
+  - Each rule only removes text it recognises, and never empties a title.
+  - A "by …" that isn't plainly names ("by Jeff, McArtor, Mike") stays in the title and is
+    flagged `check_title`. Names that are taken out are flagged `check_credits`.
+  - The volume rule only applies when there's no volume column or value.
 - **Volumes:** the `volume` column sets the volume number ("3", "03", "Vol. 3", "v3" and "2.5"
-  all work). A volume without a series makes the title the series, so ten rows titled
-  "Happiness" with volumes 1 to 10 become volumes 1 to 10 of the series "Happiness". A title that
-  repeats its volume ("Happiness, Vol. 3") is trimmed to "Happiness". Something that isn't one
-  number, such as "1-3" for an omnibus, is flagged for review, and you set it with
-  `bookshelf edit <number> --volume 1 --edition Omnibus`. Categories without a `volume` column
-  get a one-line note on import, nothing more.
-- **Same title, different volume:** the duplicate check compares line, series, volume, title,
-  first author and year, so volumes 1 to 10 of "Happiness" are never flagged as duplicates of each
-  other. Importing volume 3 twice under different item IDs is.
+  all work).
+  - A volume without a series makes the title the series: ten rows titled "Happiness" with
+    volumes 1 to 10 become volumes 1 to 10 of the series "Happiness".
+  - A title that repeats its volume ("Happiness, Vol. 3") is trimmed to "Happiness".
+  - A value that isn't a single number (such as "1-3" for an omnibus) is flagged `bad_value`.
+    Set it with `bookshelf edit <number> --volume 1 --edition Omnibus`.
+  - A category without a `volume` column gets a one-line note, nothing more.
+- **Years:** a year in the edition cell becomes the book's year ("1st; 1973" is edition 1st,
+  year 1973; "October 1952" is year 1952). So does a year after the publisher ("MacMillan,
+  New York, 1968" is publisher MacMillan, year 1968).
+- **Barcodes:** a barcode cell that's a UPC rather than an ISBN is kept as the book's barcode.
+- **Roles:** in the author cell, `(ed.)`, `(trans.)` or `(ill.)` after a name sets the role,
+  e.g. `Fray Baroque (ed.)|Tegan Eanelli (ed.)`. This is mostly useful in corrections.
+- **Duplicates:** the check compares line, series, volume, title, first author and year. So
+  volumes 1 to 10 of "Happiness" never count as duplicates of each other, but volume 3 imported
+  twice under different item IDs does.
 - **Genres** become tags.
 
 ### Teaching it new values
 
-These live in `config\mappings\mystuff2.toml`. A re-import only touches rows that changed *in
-the export*, so after editing the mapping, re-apply it with `--remap`:
+The rules live in `config\mappings\mystuff2.toml`:
+
+- **A new condition word** ("Near Mint", say): add it under `[condition_values]`, e.g.
+  `"near mint" = "excellent"`.
+- **Two spellings of one publisher:** add the variant under `[publisher_aliases]`, e.g.
+  `"Viz Media LLC" = "VIZ Media"`.
+- **Title rules:** each rule can be switched on or off under `[title_rules]`.
+- **A differently named column:** if your manga category calls its volume column something else
+  (MyStuff2 uses your attribute names), change `volume = "volume"` under `[fields]` to match.
+
+A normal re-import only touches rows that changed *in the export*. To apply new mapping rules to
+the rows you already have, add `--remap`:
 
 ```powershell
 bookshelf import data\imports\Books.csv --remap --dry-run
 ```
 
 `--remap` overwrites every field the export fills, including fixes you made with `edit` or
-`edit-many` (a trimmed title goes back to the export's title, for example), so check the
-dry run first. Fields the export doesn't fill, such as a line you set by hand, are kept.
+`edit-many` (a trimmed title goes back to the export's title, for example), so check the dry run
+first. Fields the export doesn't fill, such as a line or parts you set yourself, are kept.
 
-- **A new condition word** (say "Near Mint"): add it under `[condition_values]`, for example
-  `"near mint" = "excellent"`.
-- **Two spellings of one publisher:** add the variant under `[publisher_aliases]`, for example
-  `"Viz Media LLC" = "VIZ Media"`.
+### Fixing a row before it's imported
 
-### Fixing one row before it's imported
-
-For a row with junk in it, such as a title copied from a store listing, add an entry to
-`data\imports\mystuff2-corrections.toml`, then import again. The entry is keyed by the
-MyStuff2 item ID (the `item id` column, or the "imported from" line of `bookshelf show`), and
-each line replaces that column's cell in the export:
+For a row with junk in it, add an entry to `data\imports\mystuff2-corrections.toml` and import
+again. Each entry is keyed by the MyStuff2 item ID (the `item id` column, or the "imported from"
+line of `bookshelf show`). Each line under it replaces that column's cell:
 
 ```toml
 # Necromancer D20 Sourcebook Wurst Of Grimtooth's Traps
@@ -200,9 +381,9 @@ publisher = "Necromancer Games"
 price = "$49.99"
 ```
 
-The file already holds the 11 fixes made to your TTRPG export; they follow the same pattern.
-MyStuff2 exports co-authors alphabetically by first name, so a correction is also the way to
-put them in cover order: `author = "Gilles Deleuze|Félix Guattari"`.
+Corrections are also how you put co-authors in cover order: MyStuff2 exports them alphabetically
+by first name. For example, `author = "Gilles Deleuze|Félix Guattari"`. Use `--corrections FILE`
+to use a different corrections file.
 
 ### Importing from something other than MyStuff2
 
@@ -210,167 +391,150 @@ Copy `config\mappings\mystuff2.toml` to a new name, such as `config\mappings\myl
 change three things:
 
 - `source`: a name for where the books came from, e.g. `"mylist"`.
-- `key_column`: a column holding a unique, unchanging ID for each row. This is required, because
-  it's how re-imports avoid duplicates. For a spreadsheet you made yourself, add an ID column
+- `key_column`: a column with a unique, unchanging ID for each row. It's required, because it's
+  how re-imports avoid duplicates. For a spreadsheet you made yourself, add an ID column
   (1, 2, 3…).
-- The column names under `[fields]`.
-
-Then import with `--mapping`:
+- The column names under `[fields]`. A mapping can fill title, authors, publisher, tags, pages,
+  edition, condition, estimated_value, isbn, line, series and volume. There's no year, format
+  or shelf column yet.
 
 ```powershell
 bookshelf import data\imports\mylist.csv --mapping mylist --dry-run
 ```
 
-Its corrections file is `data\imports\mylist-corrections.toml`. A mapping can fill title,
-authors, publisher, tags, pages, edition, condition, estimated_value, isbn, line, series and
-volume. A `line` column wins over a `Line; Title` title.
-There's no separate year or format column yet.
+Its corrections file is `data\imports\mylist-corrections.toml`.
 
-If your manga category calls its column something other than `volume` (MyStuff2 uses your
-attribute names), change `volume = "volume"` in `config\mappings\mystuff2.toml` to match.
+## The website
 
-## Looking at and fixing one book
+### One-time setup
 
-`search` prints each book's number. `show` and `edit` take that number, an ISBN in any form,
-or words from the title (put several words in quotes for `edit`). In PowerShell write `56`,
-not `#56`: a `#` starts a comment there.
+1. On GitHub: repository **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+2. Run `bookshelf publish`, then watch the **Actions** tab: the workflow runs the tests, then
+   deploys.
+3. Open the site on your phone and use **Add to Home Screen** so it opens like an app.
 
-| To | Run |
+### Publishing: `publish`
+
+`bookshelf publish` updates the website in one go:
+
+1. It writes the public list to `site\data\books.json` and `site\data\books.csv`.
+2. If nothing changed since the last publish, it stops there.
+3. Otherwise it runs the tests and shows a summary, e.g. "237 books: 12 added, 3 changed,
+   0 removed".
+4. It asks, then commits those two files and pushes. GitHub rebuilds the site in a minute or two.
+
+| Option | Does |
 | --- | --- |
-| See every stored value, private ones included | `bookshelf show 56` |
-| The same as JSON | `bookshelf show 56 --json` |
-| Remove a wrong ISBN | `bookshelf edit 56 --clear isbn` |
-| Correct it | `bookshelf edit 56 --isbn 0-7869-2893-X` |
-| Fix several things at once | `bookshelf edit 56 --year 2003 --publisher "Wizards of the Coast" --condition "very good"` |
-| Replace the credits (order kept) | `bookshelf edit 56 --author "Skip Williams" --author "Jonathan Tweet" --editor "Kim Mohan"` |
-| Move into a series | `bookshelf edit "berserk deluxe" --series "Berserk Deluxe" --volume 1` |
-| Put into a product line | `bookshelf edit 56 --line "DND 3.5"` |
-| Cut a prefix off the title | `bookshelf edit 56 --trim-title "Call of Cthulhu:"` |
-| Tags | `bookshelf edit 56 --add-tag Classics --remove-tag TTRPG` |
-| Private details | `--value 120`, `--price 45`, `--notes "Signed"`, `--loaned-to Sam --loaned-on 2026-11-01` |
-| What's in a set | `--add-part "Vol. 1"`, `--missing-part 3`, `--found-part 3`, `--remove-part 3` (see below) |
-| Empty any field | `--clear FIELD` (repeatable): isbn, line, series, volume, authors, tags, parts, value, loan, … |
-| Gave it away or sold it | `bookshelf edit 56 --remove` (today) or `--remove 2026-11-17` |
-| Changed your mind | `bookshelf edit 56 --restore` |
-| Store a cover UPC (not the ISBN) | `bookshelf edit 56 --barcode 070004004007` |
-| Hide it from the website, or show it again | `bookshelf edit 56 --hidden`, `bookshelf edit 56 --public` |
+| `--yes` | don't ask before committing |
+| `--no-tests` | skip the test run |
+| `--no-push` | commit but don't push (push later with `git push`) |
 
-`edit` prints each change as `old -> new` and asks before saving (`--yes` skips the question).
-Anything it refuses changes nothing. Clears happen before sets, so `--clear series --series X`
-moves a book in one go. A removed book stays in the database with its history, drops out of
-searches and the website, and is never re-added by a re-import. Edits survive re-importing an
-unchanged MyStuff2 export, because unchanged rows are skipped.
+`publish` commits only the book list. When you change the code itself (after an update, say),
+commit and push that yourself; see [Updating bookshelf](#updating-bookshelf).
 
-### Lines and series
+`bookshelf export` writes the same two files without testing, committing or pushing, so you can
+look at them first. Use `--out FOLDER` to write them somewhere else.
 
-A **product line** groups books that belong together without an order: "DND 3.5",
-"Call of Cthulhu", "Shadowrun 5E". A **series** is numbered: "Rise of the Runelords" 1 to 6,
-"Happiness" vol. 7. A book can have both (a Pathfinder adventure path is in the line
-"Pathfinder" and a series). Keep the edition in the line's name ("DND 3.5", not "DND" plus an
-edition), because the website groups and sorts by the name.
+### What the website shows
 
-### Slipcase and boxed sets
-
-A set with one ISBN is one book: that's what you scan, buy, sell and value. List what's inside
-it as **parts**, in order:
-
-```powershell
-bookshelf edit 9781568823348 --title "Malleus Monstrorum" --format "box set" `
-    --add-part "Vol. 1: Monsters of the Mythos" --add-part "Vol. 2: Deities of the Mythos" `
-    --add-part Slipcase
-```
-
-(The backtick at the end of a line continues a PowerShell command on the next line.)
-
-- **Several works in one volume:** list each as a `work` part, so every title is searchable:
-  `--add-part "work: Human, All Too Human" --add-part "work: Beyond Good and Evil"`.
-- **Kinds:** each part has a kind (work, volume, booklet, handouts, map, screen, cards, dice,
-  slipcase, other), guessed from its name: "Vol. 2" is a volume, "Keeper Screen" a screen. To
-  choose it yourself, put it first with a colon: `--add-part "handouts: Keeper's materials"`.
-- **Numbers:** `bookshelf show` lists the parts numbered 1, 2, 3…; the other options use those
-  numbers. Removing a part renumbers the ones after it.
-- **Missing pieces:** `--missing-part 4` marks part 4 as gone, `--found-part 4` undoes it. Only
-  you see this (in `show`); the website lists what the set contains, not what you're missing.
-- **Searching** matches part names too, so "deities of the mythos" finds the set, here and on
-  the website.
-- `bookshelf add` takes `--part` (repeatable) for a new set. `edit-many` can't change parts,
-  because they belong to one book.
-- Two books bought separately, each with its own ISBN, are not a set: give them a series and
-  volume numbers instead.
-
-## Changing many books at once
-
-`edit-many` chooses books with filters, then makes the same change to each of them. It lists
-every change, asks once, and saves all of them or none: if one book refuses (say, a loan date
-without a borrower), nothing is saved and it tells you which book.
-
-```powershell
-# Every book with "Call of Cthulhu" in its title goes into that line, and loses the prefix
-bookshelf edit-many --title-has "call of cthulhu" --line "Call of Cthulhu" --trim-title "Call of Cthulhu:"
-```
-
-Choosing books (give at least one; several must all match):
-
-| Filter | Chooses |
-| --- | --- |
-| `--title-has WORDS` | these words, next to each other, in the title (case and accents ignored, whole words) |
-| `--match QUERY` | what `bookshelf search QUERY` finds (title, subtitle, line, series, authors) |
-| `--in-line NAME`, `--in-series NAME` | books in that line or series |
-| `--has-tag TAG` | books with that tag; repeat to need several |
-| `--from-publisher NAME` | books from that publisher |
-| `--no-isbn` | books without an ISBN |
-| `--ids 3,5,9-12` | those book numbers |
-| `--except 7,8` | leaves those numbers out |
-| `--all` | every book |
-| `--include-removed` | also books you've marked removed |
-
-The changes are the same as `edit`'s, except the ones that only make sense for one book:
-`--title`, `--isbn`, `--volume`, `--cover` and `--ol-key`. Useful ones:
-
-| To | Add |
-| --- | --- |
-| Set the line or series | `--line "DND 3.5"`, `--series "Rise of the Runelords"` |
-| Cut a prefix off each title | `--trim-title "Call of Cthulhu:"` (any case; `:` `;` `-` or a space after it all work; a title that would end up empty is left alone) |
-| Tags | `--add-tag Horror`, `--remove-tag TTRPG` |
-| Shelf, condition, format, publisher | `--shelf "Office 3"`, `--condition good`, `--format hardcover`, `--publisher Chaosium` |
-| Empty a field | `--clear line`, `--clear shelf`, … |
-
-- `--dry-run` shows the changes and saves nothing. Without `--yes`, it asks before saving.
-- Only the first 50 changed books are listed; `--show 500` lists more.
-- Options can't be shortened for `edit-many` (`--title` is not `--title-has`), so a typo is an
-  error rather than a different filter.
-- A later re-import leaves these changes alone unless the row changed in MyStuff2 or you use
-  `--remap`.
-
-## Adding: details
-
-`add` shows what it found and asks before saving; `--yes` skips the question. With an ISBN it
-asks Open Library for the details, and anything you type as an option wins over what it finds.
-Use `--offline` to skip the lookup. Formats: hardcover, trade paperback, mass market, paperback,
-box set, ebook, audiobook, other. Conditions: mint, like new, excellent, very good, good, fair, poor.
-
-`search` exits with status 0 when you own a match, 1 when you don't and 2 for an invalid ISBN,
-so scripts can use it.
-
-## What the website shows
-
-Title, subtitle, product line, series and volume, a set's contents, authors, edition, format, publisher, year, ISBN, number of
-copies, tags and the Open Library cover. Never: values, prices, notes, loans, shelf, condition,
-books added with `--hidden`, or books you've removed. Friends can download the same list as a
-CSV from the bottom of the page. The search box also takes an ISBN or a stored UPC, typed or
-pasted.
-
-The genre buttons under the search box show every genre with its number of books, most used
-first; tap one to show only that genre, tap it again to show everything. A search and a genre
-combine. Both end up in the page's address, so you can share them as a link:
-`…/bookshelf/?q=shadowrun`, `…/bookshelf/?tag=Math` or `…/bookshelf/?tag=Philosophy&q=badiou`.
+- **Shown:** title, subtitle, product line, series and volume, a set's contents, authors,
+  edition, format, publisher, year, ISBN, other barcode, number of copies, tags and the Open
+  Library cover.
+- **Never shown:** values, prices, notes, loans, shelf, condition, missing set pieces, books
+  marked `--hidden`, and books you've removed.
+- **Download:** friends can download the list as a CSV from the bottom of the page.
+- **Search:** the search box works like `bookshelf search`, and takes an ISBN or a stored UPC
+  too.
+- **Genres:** the buttons under the search box show every genre with its number of books, most
+  used first.
+  - Tap one to show only that genre; tap it again to show everything.
+  - A search and a genre combine.
+- **Sharing:** both end up in the page's address, so you can share them as links:
+  `…/bookshelf/?q=shadowrun`, `…/bookshelf/?tag=Math` or
+  `…/bookshelf/?tag=Philosophy&q=badiou`.
 
 ## Open Library
 
-Lookups identify themselves to Open Library and stay under one request a second. To be allowed
-three a second, set your email as contact details (sent only to Open Library):
+`bookshelf enrich` fills in missing details for books with an ISBN:
+
+- **What it fills:** publisher, year, pages, cover and Open Library key, plus authors for books
+  that have none.
+- **What it keeps:** it never overwrites a value you've set, and it doesn't change titles.
+- **Caching:** answers are cached in the database, so a re-run is quick and only asks Open
+  Library about books it hasn't asked about before. `--limit 50` stops after 50 books.
+
+`add` and `scan` use the same lookups. Lookups identify themselves to Open Library and stay
+under one request a second. To be allowed three a second, set your email as contact details
+(sent only to Open Library):
 
 ```powershell
-$env:BOOKSHELF_CONTACT = "you@example.com"                                   # this terminal only
+$env:BOOKSHELF_CONTACT = "you@example.com"                                             # this terminal only
 [Environment]::SetEnvironmentVariable("BOOKSHELF_CONTACT", "you@example.com", "User")  # permanently
 ```
+
+## Upkeep
+
+### Updating bookshelf
+
+When you get a new version of the code (a zip to unzip over the project, say):
+
+```powershell
+pytest                   # everything should pass
+bookshelf migrate        # upgrades the database if the new version needs it; backs it up first
+bookshelf rekey          # only when the update notes say so: recomputes matching keys
+git add -A
+git commit -m "Update bookshelf"
+git push
+bookshelf publish
+```
+
+`bookshelf migrate` is safe to run any time: if the database is already current, it says so and
+does nothing. The everyday commands (`add`, `scan`, `edit`, `search`, `publish` and the rest)
+refuse to run on an out-of-date database and tell you to migrate. `import` doesn't check, so
+migrate before importing.
+
+### Backups
+
+- **When they're made:** `migrate` and `import` (not `--dry-run`) copy your database into
+  `data\backups\` first, named like `books-v6-20261123T211500Z.db` (schema version and time,
+  in UTC).
+- **Restoring:** close anything using the database, then copy a backup over it:
+
+  ```powershell
+  Copy-Item data\backups\books-v6-20261123T211500Z.db data\books.db
+  ```
+
+- **Off-computer copies:** `data\` never goes to GitHub, so to keep a copy elsewhere, copy
+  `data\books.db` to another drive or a cloud folder now and then.
+
+### Your files
+
+| Where | What | On GitHub? |
+| --- | --- | --- |
+| `data\books.db` | your database | no |
+| `data\backups\` | automatic backups | no |
+| `data\imports\` | exports, corrections (they can hold prices), reject lists | no |
+| `config\mappings\` | import mappings | yes |
+| `site\` | the website; `site\data\` holds the published list | yes |
+| `schema\` | database migrations | yes |
+| `docs\` | this guide (`usage.md`) and the record of design decisions (`decisions.md`) | yes |
+
+### Other commands
+
+| Command | Does |
+| --- | --- |
+| `bookshelf init` | creates a new, empty database (refuses if one exists) |
+| `bookshelf seed` | builds a sample database of tricky test books in `data\sample.db` (`--out` for another file) |
+| `bookshelf --db data\sample.db search …` | runs any command on another database; `--db` goes before the command |
+| `bookshelf snapshot` | regenerates `schema\snapshot.sql`, which the tests compare against (after writing a migration) |
+
+### Troubleshooting
+
+| Problem | Fix |
+| --- | --- |
+| `bookshelf` isn't recognized | the virtual environment isn't active: run `.venv\Scripts\Activate.ps1` |
+| "run 'bookshelf migrate'" | the code is newer than your database: run `bookshelf migrate` |
+| `edit #56` does nothing | `#` starts a PowerShell comment: write `edit 56` |
+| "Nothing to publish" | the website already shows this collection |
+| The website hasn't changed after publishing | check the Actions tab on GitHub, then reload; your phone may show the old page for a few minutes |
+| A scanner types digits but nothing happens | it isn't sending Enter: turn on its Enter (CR) suffix |
