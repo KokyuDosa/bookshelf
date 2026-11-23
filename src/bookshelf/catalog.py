@@ -37,6 +37,8 @@ KIND_WORDS = {
     "volumes": "volume",
     "vol": "volume",
     "book": "volume",
+    "work": "work",
+    "works": "work",
     "booklet": "booklet",
     "booklets": "booklet",
     "handout": "handouts",

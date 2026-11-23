@@ -76,10 +76,35 @@ Keep export files in `data\imports\`: that folder is private and never reaches G
   never creates duplicates. Unchanged rows are skipped, so your `bookshelf edit` fixes stay. A
   row you have *changed in MyStuff2* overwrites the fields it fills in (empty cells never erase
   anything), so make fixes in bookshelf, not MyStuff2.
+- **What counts as changed:** only the columns the mapping reads (title, author, genre, price
+  and so on). Exporting with or without images, or a newer "item updated" time, changes
+  nothing. That makes it safe to import a full-collection export over a category you imported
+  before: the books already in the database are reported as unchanged.
 - **Books you already have:** a row whose ISBN you already own, for example one added by hand,
   only fills that book's empty fields; it doesn't add a second copy of the book.
-- **Titles:** `Line; Title` becomes a product line and a title ("DND 3.5; Monster Manual"),
-  `(2 Copies)` sets the copy count, and `(Hardcover)` or `Box Set` sets the format.
+- **Titles:** store-listing extras are peeled off the end of a title:
+
+  | In the title | Becomes |
+  | --- | --- |
+  | `DND 3.5; Monster Manual` | product line "DND 3.5", title "Monster Manual" |
+  | `(2 Copies)` | 2 copies |
+  | `(Hardcover)`, `- Hardcover`, `Box Set` | the format |
+  | `(Edition 2)`, `(2nd Edition)` | edition "2nd", if the edition cell is empty |
+  | `(0786931345)` | the ISBN, if the barcode cell is empty and it's a valid ISBN |
+  | `by Douglas R. Hofstadter` | cut off; it becomes the author if the author cell is empty |
+  | `Illustrated by Don Lawrence` | an illustrator credit (also "Translated by", "Edited by") |
+  | `Prophet Volume 1: Remission` | series "Prophet", vol. 1, title "Remission" (also `Vol. IV`, `(Vol. 2: …)`) |
+
+  Each rule only removes text it recognises and never empties a title. A "by …" that isn't
+  plainly names ("by Jeff, McArtor, Mike") stays in the title; names taken from a title are
+  flagged as `check_credits` so you can check them in `bookshelf review`. The volume rule only
+  applies when there's no volume column or value. The settings are under `[title_rules]` in
+  the mapping file.
+- **Years:** a year in the edition cell becomes the book's year ("1st; 1973" is edition 1st,
+  year 1973; "October 1952" is year 1952), and so does one after the publisher ("MacMillan,
+  New York, 1968" is publisher MacMillan, year 1968).
+- **Roles:** in the author cell, `(ed.)`, `(trans.)` or `(ill.)` after a name sets the role, for
+  example `Fray Baroque (ed.)|Tegan Eanelli (ed.)`. Use it in corrections.
 - **Volumes:** the `volume` column sets the volume number ("3", "03", "Vol. 3", "v3" and "2.5"
   all work). A volume without a series makes the title the series, so ten rows titled
   "Happiness" with volumes 1 to 10 become volumes 1 to 10 of the series "Happiness". A title that
@@ -126,6 +151,8 @@ price = "$49.99"
 ```
 
 The file already holds the 11 fixes made to your TTRPG export; they follow the same pattern.
+MyStuff2 exports co-authors alphabetically by first name, so a correction is also the way to
+put them in cover order: `author = "Gilles Deleuze|Félix Guattari"`.
 
 ### Importing from something other than MyStuff2
 
@@ -203,7 +230,9 @@ bookshelf edit 9781568823348 --title "Malleus Monstrorum" --format "box set" `
 
 (The backtick at the end of a line continues a PowerShell command on the next line.)
 
-- **Kinds:** each part has a kind (volume, booklet, handouts, map, screen, cards, dice,
+- **Several works in one volume:** list each as a `work` part, so every title is searchable:
+  `--add-part "work: Human, All Too Human" --add-part "work: Beyond Good and Evil"`.
+- **Kinds:** each part has a kind (work, volume, booklet, handouts, map, screen, cards, dice,
   slipcase, other), guessed from its name: "Vol. 2" is a volume, "Keeper Screen" a screen. To
   choose it yourself, put it first with a colon: `--add-part "handouts: Keeper's materials"`.
 - **Numbers:** `bookshelf show` lists the parts numbered 1, 2, 3…; the other options use those
@@ -276,7 +305,12 @@ so scripts can use it.
 Title, subtitle, product line, series and volume, a set's contents, authors, edition, format, publisher, year, ISBN, number of
 copies, tags and the Open Library cover. Never: values, prices, notes, loans, shelf, condition,
 books added with `--hidden`, or books you've removed. Friends can download the same list as a
-CSV from the bottom of the page, and you can share a search as a link: `…/bookshelf/?q=shadowrun`.
+CSV from the bottom of the page.
+
+The genre buttons under the search box show every genre with its number of books, most used
+first; tap one to show only that genre, tap it again to show everything. A search and a genre
+combine. Both end up in the page's address, so you can share them as a link:
+`…/bookshelf/?q=shadowrun`, `…/bookshelf/?tag=Math` or `…/bookshelf/?tag=Philosophy&q=badiou`.
 
 ## Open Library
 

@@ -383,3 +383,34 @@ def test_edit_many_has_no_single_book_options(shelf):
     for option in ("--title", "--isbn", "--volume", "--cover", "--ol-key"):
         with pytest.raises(SystemExit):
             run(shelf, "edit-many", "--all", option, "1")
+
+
+def test_unmapped_columns_coming_and_going_count_as_unchanged(db_path, tmp_path):
+    """The real case: the first export had image file names, a later one had no image column."""
+    from tests.test_import import HEADER
+
+    with_images = [
+        dict(b, item_images=f"{b['item_id']}.jpg", item_updated="2023-01-01") for b in BOOKS
+    ]
+    import_file(db_path, write_export(tmp_path / "a.csv", with_images, HEADER), MAPPING)
+    with closing(connect(db_path)) as conn, conn:
+        conn.execute("UPDATE books SET title = 'My Fix' WHERE title = 'Feng Shui'")
+    no_images = [h for h in HEADER if h != "item images"]
+    touched = [dict(b, item_updated="2026-11-19") for b in BOOKS]
+    report = import_file(db_path, write_export(tmp_path / "b.csv", touched, no_images), MAPPING)
+    assert (report.updated, report.unchanged) == (0, 3)
+    assert "My Fix" in lines_of(db_path)
+
+
+def test_rows_hashed_by_v1_upgrade_without_overwriting(db_path, tmp_path):
+    from tests.test_import import HEADER
+
+    with_images = [dict(b, item_images="x.jpg") for b in BOOKS]
+    import_file(db_path, write_export(tmp_path / "a.csv", with_images, HEADER), MAPPING)
+    with closing(connect(db_path)) as conn, conn:
+        conn.execute("UPDATE source_records SET row_hash = 'cells-v1:0123'")
+        conn.execute("UPDATE books SET title = 'My Fix' WHERE title = 'Feng Shui'")
+    no_images = [h for h in HEADER if h != "item images"]
+    report = import_file(db_path, write_export(tmp_path / "b.csv", BOOKS, no_images), MAPPING)
+    assert (report.updated, report.unchanged) == (0, 3)
+    assert "My Fix" in lines_of(db_path)

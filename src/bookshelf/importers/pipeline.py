@@ -118,27 +118,36 @@ def load_corrections(path: Path | None) -> dict[str, dict[str, str]]:
 # ---------------------------------------------------------------- write
 
 
-HASH_VERSION = "cells-v1:"
+HASH_VERSION = "cells-v2:"
 
 
-def row_hash(cells: dict[str, str]) -> str:
+def _filled(cells: dict[str, str], columns: set[str]) -> dict[str, str]:
+    """The non-empty cells of the columns the mapping reads, with spacing tidied."""
+    return {k: " ".join(v.split()) for k, v in cells.items() if k in columns and v and v.strip()}
+
+
+def row_hash(cells: dict[str, str], columns: set[str]) -> str:
     """Fingerprint of the export row itself (after corrections), not of what bookshelf made of it.
 
     SQLite is the master copy, so a re-import may only touch a book when its row in the export
     really changed. Hashing the mapped values instead would make every mapping-rule change look
-    like an edit and overwrite your fixes. Empty cells are left out, so a new, empty column in
-    the export doesn't count as a change either.
+    like an edit and overwrite your fixes.
+
+    Only the columns the mapping reads count. Image file names, attachments and "item updated"
+    come and go between exports (an export without images drops that column) without the book
+    changing. Empty cells are left out too, so a missing column equals an empty one.
     """
-    filled = {k: " ".join(v.split()) for k, v in cells.items() if v and v.strip()}
-    payload = json.dumps(filled, sort_keys=True, ensure_ascii=False)
+    payload = json.dumps(_filled(cells, columns), sort_keys=True, ensure_ascii=False)
     return HASH_VERSION + hashlib.sha256(payload.encode()).hexdigest()
 
 
-def _unchanged(old_hash: str, old_raw_json: str, digest: str, raw: "RawRow") -> bool:
+def _unchanged(
+    old_hash: str, old_raw_json: str, digest: str, raw: "RawRow", columns: set[str]
+) -> bool:
     if old_hash.startswith(HASH_VERSION):
         return old_hash == digest
-    # Rows imported before cells were hashed: compare the stored original row instead.
-    return json.loads(old_raw_json) == raw.cells
+    # Rows hashed by an older version: compare the stored original row, on the same columns.
+    return _filled(json.loads(old_raw_json), columns) == _filled(raw.cells, columns)
 
 
 def _flag(conn, run_id, book_id, reason, details, candidate=None) -> bool:
@@ -166,7 +175,8 @@ def _write_row(
     report: Report,
     remap: bool = False,
 ) -> None:
-    digest = row_hash(cells)
+    columns = m.columns()
+    digest = row_hash(cells, columns)
     raw_json = json.dumps(raw.cells, ensure_ascii=False)
     known = conn.execute(
         "SELECT book_id, row_hash, raw_json FROM source_records "
@@ -177,7 +187,7 @@ def _write_row(
     flags = [(reason, details, None) for reason, details in mapped.flags]
     if known:  # seen before: the source is authoritative for what it supplies
         book_id, old_hash, old_raw_json = known
-        if _unchanged(old_hash, old_raw_json, digest, raw) and not remap:
+        if _unchanged(old_hash, old_raw_json, digest, raw, columns) and not remap:
             report.unchanged += 1
         else:
             update_book(conn, book_id, mapped.book, "overwrite")

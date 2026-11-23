@@ -44,6 +44,13 @@ function bookItem(b) {
     const text = b.volume == null ? b.series : same ? `Vol. ${b.volume}` : `${b.series} · Vol. ${b.volume}`;
     body.append(el("p", "series", text));
   }
+  if (b.contents) {
+    // A set's pieces, indented under its title: "Vol. 1", "Vol. 2", "Slipcase"
+    const list = el("ul", "parts");
+    list.setAttribute("aria-label", "In this set");
+    for (const part of b.contents) list.append(el("li", null, part));
+    body.append(list);
+  }
   if (b.authors) body.append(el("p", "authors", b.authors.join(", ")));
   const meta = [b.edition && editionLabel(b.edition), b.format, b.year].filter(Boolean);
   if (meta.length || b.copies > 1) {
@@ -51,7 +58,6 @@ function bookItem(b) {
     if (b.copies > 1) line.append(el("span", "copies", `${b.copies} copies`));
     body.append(line);
   }
-  if (b.contents) body.append(el("p", "contents", `Contains ${b.contents.join(" · ")}`));
   li.append(body);
   return li;
 }
@@ -110,6 +116,7 @@ function run() {
 
   const params = new URLSearchParams(location.search);
   if (query.trim()) params.set("q", query.trim()); else params.delete("q");
+  if (activeTag) params.set("tag", activeTag); else params.delete("tag");
   const qs = params.toString();
   history.replaceState(null, "", qs ? `?${qs}` : location.pathname);
 }
@@ -118,20 +125,29 @@ function buildTags() {
   const counts = new Map();
   for (const b of books) for (const t of b.tags || []) counts.set(t, (counts.get(t) || 0) + 1);
   if (counts.size < 2) return;
-  const top = [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 14);
+  // Every genre, most-used first; the row scrolls sideways on a phone.
+  const all = [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  // ?tag=math opens the list filtered, so a link can share one genre
+  const wanted = new URLSearchParams(location.search).get("tag");
+  activeTag = all.find(([t]) => wanted && normalizeText(t) === normalizeText(wanted))?.[0] ?? null;
+  const press = () => {
+    for (const c of tagBox.children) c.setAttribute("aria-pressed", String(c.dataset.tag === (activeTag ?? "")));
+  };
   const chip = (label, tag) => {
     const b = el("button", "chip", label);
     b.type = "button";
-    b.setAttribute("aria-pressed", String(activeTag === tag));
+    b.dataset.tag = tag ?? "";
     b.addEventListener("click", () => {
-      activeTag = tag;
-      for (const c of tagBox.children) c.setAttribute("aria-pressed", String(c === b));
+      activeTag = activeTag === tag ? null : tag; // tapping the chosen genre again shows all
+      press();
       run();
     });
     return b;
   };
-  tagBox.append(chip("All", null), ...top.map(([t, n]) => chip(`${t} ${n}`, t)));
+  tagBox.append(chip("All", null), ...all.map(([t, n]) => chip(`${t} ${n}`, t)));
+  press();
   tagBox.hidden = false;
+  tagBox.querySelector('[aria-pressed="true"]')?.scrollIntoView({ inline: "center", block: "nearest" });
 }
 
 function footer(data) {
