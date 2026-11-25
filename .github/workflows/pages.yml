@@ -28,17 +28,32 @@ jobs:
       - run: ruff check .
       - run: pytest -q   # includes the privacy check on site/data/books.json
 
-  deploy:
+  # The upload has its own job. When deploy-pages ran in the same job, it sometimes asked for
+  # the files a second after uploading them and was told "No artifacts named github-pages"
+  # (2026-11-25). A finished job's upload is always registered. It also makes "re-run failed
+  # jobs" safe: only the deploy runs again, so there's never a second copy of the upload.
+  build:
     needs: test        # a failing test leaves the previous site live
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url || steps.retry.outputs.page_url }}
+    steps:
       - id: deployment
+        uses: actions/deploy-pages@v4
+        continue-on-error: true   # a hiccup on GitHub's side gets one more try below
+      - if: steps.deployment.outcome == 'failure'
+        run: sleep 30
+      - id: retry
+        if: steps.deployment.outcome == 'failure'
         uses: actions/deploy-pages@v4
