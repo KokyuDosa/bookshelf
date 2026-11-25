@@ -2,7 +2,7 @@
 
 Run every command from the project folder in the VS Code terminal, with the virtual environment
 active: the prompt shows `(.venv)`, or run `.venv\Scripts\Activate.ps1`. Your website is
-**<https://kokyudosa.github.io/bookshelf/>**.
+**https://kokyudosa.github.io/bookshelf/**.
 
 Every command explains its options with `--help`, for example `bookshelf edit --help`.
 
@@ -20,6 +20,8 @@ Every command explains its options with `--help`, for example `bookshelf edit --
 | To | Run |
 | --- | --- |
 | Check whether you own something | `bookshelf search hollow earth` or `bookshelf search 978-1-4243-0829-3` |
+| List a genre, or search inside one | `bookshelf search --tag Math`, `bookshelf search badiou --tag Philosophy` |
+| See your genres | `bookshelf tags` |
 | See everything about one book | `bookshelf show 56` |
 | Add a stack of books, scanned or typed | `bookshelf scan`, then scan or type ISBNs |
 | Add a run of one series | `bookshelf scan --tag Manga --series "Kaiju No. 8"` |
@@ -40,6 +42,10 @@ bookshelf search hollow earth          # words from the title, subtitle, line, s
 bookshelf search happiness 7           # volume 7 of a series ("happiness vol 7" works too)
 bookshelf search 0-7869-2886-0         # an ISBN-10 or ISBN-13, hyphens or not
 bookshelf search 070004004007          # a stored UPC or store code
+bookshelf search --tag Math            # every book in a genre, A to Z
+bookshelf search badiou --tag Philosophy
+bookshelf search --tag Philosophy --tag Politics   # books with both genres
+bookshelf tags                         # your genres, with how many books each
 ```
 
 - Every word you type must start a word of the book, so `hob tolk` finds *The Hobbit* by
@@ -49,7 +55,16 @@ bookshelf search 070004004007          # a stored UPC or store code
 - Hidden books are included, but removed ones aren't.
 - The exit status is 0 when you own a match, 1 when you don't and 2 for an invalid ISBN, so
   scripts can use it.
-- The website's search box follows the same rules.
+- **Genres (tags):** `--tag` keeps only books with that genre; repeat it to need several. On its
+  own it lists the whole genre in A-to-Z order (by line, then series and volume, then title).
+  - Case, accents and a plural don't matter: `--tag "graphic novels"` finds Graphic Novel.
+  - A name that isn't one of your genres gets suggestions: `No genre called 'sci'. Did you mean:
+    Science Fiction, Computer Science, Science?`
+  - Genre names aren't matched by plain search words, so `bookshelf search history` still looks
+    for "history" in titles, not every History book.
+- **`bookshelf tags`** lists your genres with their number of books, most used first
+  (`--by-name` for A to Z). Removed books aren't counted.
+- The website's search box follows the same rules, and its genre buttons work like `--tag`.
 
 ## Adding books
 
@@ -66,7 +81,7 @@ bookshelf scan --shelf "Office 3" --tag Philosophy     # applied to every book t
 bookshelf scan --tag Manga --series "Kaiju No. 8"      # one series, volume by volume
 ```
 
-```powershell
+```
 scan> 9780786928866
   Added #240  Player's Handbook — Jonathan Tweet, Monte Cook, Skip Williams — 2003
 scan> 9781568823348
@@ -109,7 +124,7 @@ While scanning, type:
   title ("Kaiju No. 8, Vol. 3" becomes title "Kaiju No. 8", vol. 3) or subtitle ("Vol. 3").
   When there's none, you're asked:
 
-  ```powershell
+  ```
     Volume in Kaiju No. 8 [4]:
   ```
 
@@ -122,7 +137,6 @@ While scanning, type:
   several.
 
 **Setting up the scanner:**
-
 1. Plug it in and scan a book into Notepad. It should type the digits and start a new line.
 2. If it doesn't press Enter after each code, turn on its "Enter suffix" (or "CR suffix") by
    scanning the setup barcode in its manual.

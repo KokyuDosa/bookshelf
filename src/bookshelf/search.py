@@ -84,3 +84,66 @@ def describe(book: dict) -> str:
     if book.get("contents"):
         parts.append("contains " + " + ".join(book["contents"]))
     return "  —  ".join(parts)
+
+
+# ---------------------------------------------------------------- genres (tags)
+
+
+def _tag_key(name: str) -> str:
+    """Case, accents and a plural ending don't matter: "graphic novels" = "Graphic Novel"."""
+    key = normalize_text(name)
+    if key.endswith("ies") and len(key) > 4:
+        return key[:-3] + "y"
+    if key.endswith("s") and not key.endswith("ss") and len(key) > 3:
+        return key[:-1]
+    return key
+
+
+def genre_counts(books: list[dict]) -> list[tuple[str, int]]:
+    """Every genre on these books with its number of books, most used first."""
+    counts: dict[str, int] = {}
+    for b in books:
+        for t in b.get("tags", []):
+            counts[t] = counts.get(t, 0) + 1
+    return sorted(counts.items(), key=lambda tc: (-tc[1], tc[0].casefold()))
+
+
+def resolve_genres(books: list[dict], wanted: list[str]) -> tuple[list[str], dict[str, list[str]]]:
+    """Typed genre names -> the genres as you spelled them in the collection.
+
+    Returns (found, unknown) where unknown maps each name that matched nothing to the genres
+    that look close (containing it, or starting the same way), for a "did you mean" hint.
+    """
+    by_key = {_tag_key(name): name for name, _ in genre_counts(books)}
+    found: list[str] = []
+    unknown: dict[str, list[str]] = {}
+    for name in wanted:
+        hit = by_key.get(_tag_key(name))
+        if hit:
+            if hit not in found:
+                found.append(hit)
+            continue
+        typed = normalize_text(name)
+        unknown[name] = [
+            g for k, g in by_key.items() if typed and (typed in k or k.startswith(typed[:3]))
+        ][:5]
+    return found, unknown
+
+
+def with_genres(books: list[dict], genres: list[str]) -> list[dict]:
+    """Books that have every one of `genres`."""
+    want = {_tag_key(g) for g in genres}
+    return [b for b in books if want <= {_tag_key(t) for t in b.get("tags", [])}]
+
+
+def browse_order(books: list[dict]) -> list[dict]:
+    """Line, then series and volume, then title: the website's A-to-Z order."""
+    return sorted(
+        books,
+        key=lambda b: (
+            normalize_text(b.get("line", "")),
+            normalize_text(b.get("series", "")) or b["key"],
+            b.get("volume", 0),
+            b["key"],
+        ),
+    )

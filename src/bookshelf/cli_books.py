@@ -41,7 +41,14 @@ from bookshelf.openlibrary import LookupFailed, OpenLibrary
 from bookshelf.paths import PROJECT_ROOT
 from bookshelf.publish import PublishError, publish
 from bookshelf.scan import Defaults, Session
-from bookshelf.search import describe, search
+from bookshelf.search import (
+    browse_order,
+    describe,
+    genre_counts,
+    resolve_genres,
+    search,
+    with_genres,
+)
 
 SITE_DATA = PROJECT_ROOT / "site" / "data"
 
@@ -496,30 +503,70 @@ def cmd_search(args: argparse.Namespace) -> int:
     if conn is None:
         return 1
     with closing(conn), conn:
-        result = search(public_books(conn, include_hidden=True), " ".join(args.query))
-    if result.mode == "empty":
-        return fail("Give some words to search for: bookshelf search hobbit")
-    if result.mode == "bad-isbn":
-        return fail("That isn't a valid ISBN: the check digit doesn't match.", 2)
-    if not result.books:
+        books = public_books(conn, include_hidden=True)
+    query = " ".join(args.query)
+    if not query.strip() and not args.tag:
+        return fail(
+            "Give some words to search for, a genre, or both: bookshelf search hobbit, "
+            "bookshelf search --tag Philosophy"
+        )
+
+    heading = "In the collection"
+    if args.tag:
+        genres, unknown = resolve_genres(books, args.tag)
+        if unknown:
+            for name, close in unknown.items():
+                hint = f" Did you mean: {', '.join(close)}?" if close else ""
+                print(f"No genre called {name!r}.{hint}", file=sys.stderr)
+            print("'bookshelf tags' lists your genres.", file=sys.stderr)
+            return 1
+        books = with_genres(books, genres)
+        heading = f"In {' + '.join(genres)}"
+
+    if query.strip():
+        result = search(books, query)
+        if result.mode == "bad-isbn":
+            return fail("That isn't a valid ISBN: the check digit doesn't match.", 2)
+        found = result.books
+    else:
+        result, found = None, browse_order(books)
+
+    if not found:
         which = (
             f" No book has ISBN {result.isbn}."
-            if result.isbn
+            if result and result.isbn
             else f" No book has barcode {result.barcode}."
-            if result.barcode
+            if result and result.barcode
             else ""
         )
-        print("Not in the collection." + which)
+        print(
+            ("Not in the collection." if not args.tag else f"Nothing in {heading[3:]} matches.")
+            + which
+        )
         return 1
-    print(
-        f"In the collection ({len(result.books)}):"
-        if len(result.books) > 1
-        else "In the collection:"
-    )
-    for book in result.books[: args.limit]:
+    print(f"{heading} ({len(found)}):" if len(found) > 1 else f"{heading}:")
+    for book in found[: args.limit]:
         print(f"  {book['id']:>5}  {describe(book)}")
-    if len(result.books) > args.limit:
-        print(f"  … and {len(result.books) - args.limit} more (use --limit)")
+    if len(found) > args.limit:
+        print(f"  … and {len(found) - args.limit} more (use --limit {len(found)})")
+    return 0
+
+
+def cmd_tags(args: argparse.Namespace) -> int:
+    conn = open_db(args.db)
+    if conn is None:
+        return 1
+    with closing(conn), conn:
+        counts = genre_counts(public_books(conn, include_hidden=True))
+    if not counts:
+        print("No genres yet. Add them with --tag (add, scan) or --add-tag (edit, edit-many).")
+        return 0
+    if args.by_name:
+        counts.sort(key=lambda tc: tc[0].casefold())
+    width = len(str(max(n for _, n in counts)))
+    print(f"{len(counts)} genres:")
+    for name, n in counts:
+        print(f"  {n:>{width}}  {name}")
     return 0
 
 
@@ -777,10 +824,26 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--dry-run", action="store_true", help="show the changes, save nothing")
     p.set_defaults(func=cmd_edit_many)
 
-    p = sub.add_parser("search", help="do I own this? title, series, author or ISBN")
-    p.add_argument("query", nargs="+")
-    p.add_argument("--limit", type=int, default=25)
+    p = sub.add_parser(
+        "search",
+        help="do I own this? title, series, author or ISBN, optionally in a genre",
+        description="Words must each start a word of the title, subtitle, line, series, authors "
+        "or a set's contents. With --tag, only books in that genre; with --tag alone, the whole "
+        "genre in A-to-Z order.",
+    )
+    p.add_argument("query", nargs="*")
+    p.add_argument(
+        "--tag",
+        action="append",
+        metavar="GENRE",
+        help="only books with this genre (tag); repeat to need several",
+    )
+    p.add_argument("--limit", type=int, default=25, help="list at most this many (default 25)")
     p.set_defaults(func=cmd_search)
+
+    p = sub.add_parser("tags", help="list your genres (tags) and how many books have each")
+    p.add_argument("--by-name", action="store_true", help="A to Z instead of most used first")
+    p.set_defaults(func=cmd_tags)
 
     p = sub.add_parser(
         "enrich", help="fill missing years, pages, publishers and covers from Open Library"
