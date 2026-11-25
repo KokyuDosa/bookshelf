@@ -1,0 +1,24 @@
+# Open Library subject -> one of your genres (tags).
+#
+# `bookshelf scan` and `bookshelf add` suggest genres from Open Library's subjects, but only
+# genres you already use (a tag on at least one book) or give with --tag. A subject matches a
+# genre with the same name, ignoring case, accents and a plural "s" ("Graphic novels" ->
+# "Graphic Novel"), or the part before a comma or "--" ("Philosophy, Modern" -> "Philosophy").
+#
+# For wording that differs, add a line here. Keys are matched the same way; a target that isn't
+# one of your genres is ignored, so lines for genres you don't use yet do no harm.
+
+[aliases]
+"Mathematics" = "Math"
+"Political science" = "Politics"
+"Politics and government" = "Politics"
+"Fiction, science fiction, general" = "Science Fiction"
+"Comics & graphic novels" = "Graphic Novel"
+"Comic books, strips, etc." = "Graphic Novel"
+"Comics & graphic novels, manga, general" = "Manga"
+"Biography & autobiography" = "Biographies"
+"Autobiography" = "Biographies"
+"Cookery" = "Cooking"
+"Role playing" = "TTRPG"
+"Fantasy games" = "TTRPG"
+"Queer theory" = "Queer"

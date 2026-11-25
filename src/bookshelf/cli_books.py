@@ -33,8 +33,10 @@ from bookshelf.editing import (
 )
 from bookshelf.entry import enrich, find_owned, lookup_code
 from bookshelf.export import public_books, write_export
-from bookshelf.importers.mapping import normalize_edition, parse_money_cents
+from bookshelf.genres import matcher_for
+from bookshelf.importers.mapping import normalize_edition, parse_money_cents, split_volume
 from bookshelf.isbn import InvalidISBN, canonical_barcode, to_isbn13
+from bookshelf.normalize import normalize_text
 from bookshelf.openlibrary import LookupFailed, OpenLibrary
 from bookshelf.paths import PROJECT_ROOT
 from bookshelf.publish import PublishError, publish
@@ -182,6 +184,19 @@ def _add(conn: sqlite3.Connection, args: argparse.Namespace) -> int:
         ).fetchone()
     ):
         book.ol_edition_key = None  # another of your books already holds that Open Library record
+    if (
+        args.series
+        and args.volume is None
+        and not args.title
+        and (split := split_volume(book.title))
+    ):
+        _, book.series_index, book.title = split  # "Kaiju No. 8, Vol. 3" -> vol. 3
+    suggested: list[str] = []
+    if found and not args.no_genres:
+        given = {normalize_text(t) for t in book.tags}
+        matcher = matcher_for(conn, book.tags)
+        suggested = [g for g in matcher.suggest(found.subjects) if normalize_text(g) not in given]
+        book.tags += suggested
 
     preview = {
         "title": book.title,
@@ -199,6 +214,8 @@ def _add(conn: sqlite3.Connection, args: argparse.Namespace) -> int:
     print(f"  {describe({k: v for k, v in preview.items() if v not in (None, [])})}")
     if isbn13:
         print(f"  ISBN {isbn13}" + ("" if book.is_public else "  (hidden from the website)"))
+    if suggested:
+        print(f"  Genres from Open Library: {', '.join(suggested)} (--no-genres to skip)")
     duplicates = find_by_natural_key(conn, book)
     if duplicates:
         print(f"  Careful: this looks like book #{duplicates[0]}, already in your collection.")
@@ -231,6 +248,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
                 shelf=args.shelf,
                 tags=args.tag or [],
                 line=args.line,
+                series=args.series,
                 condition=lookup_code(conn, "condition", args.condition)
                 if args.condition
                 else None,
@@ -240,7 +258,10 @@ def cmd_scan(args: argparse.Namespace) -> int:
         except ValueError as exc:
             return fail(str(exc))
         lookup = None if args.offline else OpenLibrary(conn).lookup
-        session = Session(conn, lookup, input, defaults=defaults, bell=not args.quiet)
+        genres = None if args.no_genres else matcher_for(conn, defaults.tags)
+        session = Session(
+            conn, lookup, input, defaults=defaults, bell=not args.quiet, genres=genres
+        )
         counts = session.run()
     if counts.added or counts.copies:
         tip = "Run 'bookshelf publish' to update the website."
@@ -686,6 +707,11 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument(
         "--another-copy", action="store_true", help="if you own this ISBN, count one more copy"
     )
+    p.add_argument(
+        "--no-genres",
+        action="store_true",
+        help="don't add genres from Open Library's subjects (only genres you already use are)",
+    )
     p.add_argument("--offline", action="store_true", help="don't ask Open Library")
     p.add_argument("--yes", "-y", action="store_true", help="add without asking to confirm")
     p.set_defaults(func=cmd_add)
@@ -705,11 +731,21 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--shelf", help="e.g. 'Office 3', for every book scanned")
     p.add_argument("--tag", action="append", help="genre or label; repeat for several")
     p.add_argument("--line", help="product line for every book, e.g. 'DND 3.5'")
+    p.add_argument(
+        "--series",
+        help="numbered series for every book, e.g. 'Kaiju No. 8'; each volume number is read "
+        "from the title, or asked for (Enter takes the next number)",
+    )
     p.add_argument("--condition", help="mint, like new, excellent, very good, good, fair, poor")
     p.add_argument("--format", help="hardcover, paperback, box set, …")
     p.add_argument("--hidden", action="store_true", help="keep these books off the website")
     p.add_argument("--offline", action="store_true", help="don't look books up on Open Library")
     p.add_argument("--quiet", action="store_true", help="no beep for problems")
+    p.add_argument(
+        "--no-genres",
+        action="store_true",
+        help="don't add genres from Open Library's subjects (only genres you already use are)",
+    )
     p.set_defaults(func=cmd_scan)
 
     p = sub.add_parser("edit", help="change or clear any value of one book")

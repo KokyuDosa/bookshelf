@@ -2,7 +2,7 @@
 
 Run every command from the project folder in the VS Code terminal, with the virtual environment
 active: the prompt shows `(.venv)`, or run `.venv\Scripts\Activate.ps1`. Your website is
-**https://kokyudosa.github.io/bookshelf/**.
+**<https://kokyudosa.github.io/bookshelf/>**.
 
 Every command explains its options with `--help`, for example `bookshelf edit --help`.
 
@@ -21,7 +21,8 @@ Every command explains its options with `--help`, for example `bookshelf edit --
 | --- | --- |
 | Check whether you own something | `bookshelf search hollow earth` or `bookshelf search 978-1-4243-0829-3` |
 | See everything about one book | `bookshelf show 56` |
-| Add a stack of books with a barcode scanner | `bookshelf scan` |
+| Add a stack of books, scanned or typed | `bookshelf scan`, then scan or type ISBNs |
+| Add a run of one series | `bookshelf scan --tag Manga --series "Kaiju No. 8"` |
 | Add one book by ISBN | `bookshelf add 9781421534466` |
 | Add a book with no ISBN | `bookshelf add --title "The Time Machine" --author "H. G. Wells" --year 1895` |
 | Count a second copy | `bookshelf add 9780786928866 --another-copy` |
@@ -56,14 +57,16 @@ bookshelf search 070004004007          # a stored UPC or store code
 
 A USB barcode scanner types the code and presses Enter, like a keyboard, so `bookshelf scan`
 turns the terminal into a scanning station. Scan one book after another; each new book is saved
-straight away.
+straight away. Without a scanner, type the ISBNs instead: hyphens, spaces and ISBN-10s are
+fine, and a typo is caught by the check digit.
 
 ```powershell
 bookshelf scan
 bookshelf scan --shelf "Office 3" --tag Philosophy     # applied to every book this session
+bookshelf scan --tag Manga --series "Kaiju No. 8"      # one series, volume by volume
 ```
 
-```
+```powershell
 scan> 9780786928866
   Added #240  Player's Handbook — Jonathan Tweet, Monte Cook, Skip Williams — 2003
 scan> 9781568823348
@@ -97,10 +100,29 @@ While scanning, type:
   beep off.
 - **No connection?** If Open Library can't be reached, the session carries on without it and
   asks for titles. `--offline` does that from the start.
-- **Options for the whole session:** `--shelf`, `--tag` (repeatable), `--line`, `--condition`,
-  `--format` and `--hidden`.
+- **Genres** are suggested from Open Library's subjects, but only genres you already use (a tag
+  on at least one book) or give with `--tag`. A suggestion never creates a new genre. Suggested
+  genres are listed under the book (`genres from Open Library: Science Fiction`);
+  `--no-genres` turns this off. To teach it Open Library's wording ("Mathematics" for your
+  "Math"), see [Teaching it new values](#teaching-it-new-values).
+- **`--series`** puts every book in that series. Each volume number is read from Open Library's
+  title ("Kaiju No. 8, Vol. 3" becomes title "Kaiju No. 8", vol. 3) or subtitle ("Vol. 3").
+  When there's none, you're asked:
+
+  ```powershell
+    Volume in Kaiju No. 8 [4]:
+  ```
+
+  Press Enter to take the suggestion (one after the last volume this session), type a number
+  (`2.5` works), or `-` for none. Undoing a book with `u` also takes back its number.
+- **Options for the whole session:** `--shelf`, `--tag` (repeatable), `--line`, `--series`,
+  `--condition`, `--format` and `--hidden`.
+- **Fixing a mistake:** `u` takes back the last book. After the session, `bookshelf edit
+  <number>` fixes one book, and `bookshelf edit-many --ids 241-250 …` fixes the same thing on
+  several.
 
 **Setting up the scanner:**
+
 1. Plug it in and scan a book into Notepad. It should type the digits and start a new line.
 2. If it doesn't press Enter after each code, turn on its "Enter suffix" (or "CR suffix") by
    scanning the setup barcode in its manual.
@@ -117,6 +139,11 @@ bookshelf add 9781568823348 --format "box set" --part "Vol. 1" --part "Vol. 2" -
 
 With an ISBN, `add` asks Open Library for the details. Anything you give as an option wins over
 what it finds. It then shows the book and asks before saving.
+
+- Genres are suggested the same way as in [scanning](#scanning-a-stack), only from genres you
+  already use, and shown before you confirm.
+- With `--series` but no `--volume`, the volume is read from Open Library's title, as in
+  scanning.
 
 - If you already own the ISBN, it says so instead of adding a second copy. Add `--another-copy`
   to count one more.
@@ -139,6 +166,7 @@ what it finds. It then shows the book and asks before saving.
 | `--value` | estimated value, e.g. `45.00` (private) |
 | `--hidden` | keep it off the website |
 | `--another-copy` | if you already own this ISBN, count one more copy |
+| `--no-genres` | don't add genres suggested from Open Library's subjects |
 | `--offline` | don't ask Open Library |
 | `--yes` | save without asking |
 
@@ -353,6 +381,9 @@ The rules live in `config\mappings\mystuff2.toml`:
 - **Two spellings of one publisher:** add the variant under `[publisher_aliases]`, e.g.
   `"Viz Media LLC" = "VIZ Media"`.
 - **Title rules:** each rule can be switched on or off under `[title_rules]`.
+- **Genre suggestions:** `config\genre_aliases.toml` maps Open Library's subject wording to your
+  genres, e.g. `"Mathematics" = "Math"`. A line naming a genre you don't use does nothing until
+  you do.
 - **A differently named column:** if your manga category calls its volume column something else
   (MyStuff2 uses your attribute names), change `volume = "volume"` under `[fields]` to match.
 
@@ -463,7 +494,7 @@ look at them first. Use `--out FOLDER` to write them somewhere else.
 - **Caching:** answers are cached in the database, so a re-run is quick and only asks Open
   Library about books it hasn't asked about before. `--limit 50` stops after 50 books.
 
-`add` and `scan` use the same lookups. Lookups identify themselves to Open Library and stay
+`add` and `scan` use the same lookups, and also use Open Library's subjects to suggest genres. Lookups identify themselves to Open Library and stay
 under one request a second. To be allowed three a second, set your email as contact details
 (sent only to Open Library):
 

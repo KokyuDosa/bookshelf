@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 
 from bookshelf.catalog import Credit, NewBook, add_book, find_by_natural_key
 from bookshelf.entry import find_owned
+from bookshelf.genres import GenreMatcher
+from bookshelf.importers.mapping import parse_volume, split_volume
 from bookshelf.isbn import InvalidISBN, canonical_barcode, clean_scan, looks_like_isbn, to_isbn13
 from bookshelf.normalize import normalize_text
 from bookshelf.openlibrary import Found, LookupFailed
@@ -29,6 +31,7 @@ class Defaults:
     shelf: str | None = None
     tags: list[str] = field(default_factory=list)
     line: str | None = None
+    series: str | None = None  # every book goes in this series; volumes from titles or asked
     condition: str | None = None
     format: str | None = None
     hidden: bool = False
@@ -64,6 +67,7 @@ class Session:
         defaults: Defaults | None = None,
         bell: bool = True,
         today: Callable[[], str] = lambda: dt.date.today().isoformat(),
+        genres: GenreMatcher | None = None,
     ):
         self.conn = conn
         self.lookup = lookup  # None: offline
@@ -75,6 +79,8 @@ class Session:
         self.counts = Counts()
         self.undo: list[tuple[str, Callable[[], None]]] = []
         self.last_seen: int | None = None  # book the + command adds a copy to
+        self.genres = genres  # None: no genre suggestions
+        self.last_volume: float | None = None  # for suggesting the next volume
 
     # ------------------------------------------------------------ the loop
 
@@ -149,14 +155,18 @@ class Session:
                 cover_url=found.cover_url,
                 ol_edition_key=found.ol_edition_key,
             )
+            suggested = self.genres.suggest(found.subjects) if self.genres else []
         else:
+            suggested = []
             if asked and self.lookup is not None:
                 self.say(f"{self.bell}  Open Library doesn't know ISBN {isbn13}.")
             else:
                 self.say(f"  ISBN {isbn13}: not looked up (no Open Library this session).")
             book = self._ask_details(placeholder=f"ISBN {isbn13}")
         book.isbn, book.barcode = isbn13, barcode
-        self._save(book, placeholder=book.title == f"ISBN {isbn13}" and not found)
+        self._save(
+            book, placeholder=book.title == f"ISBN {isbn13}" and not found, suggested=suggested
+        )
 
     def _barcode(self, code: str) -> None:
         owned = self.conn.execute(
@@ -203,11 +213,45 @@ class Session:
 
     # ------------------------------------------------------------ saving and undoing
 
-    def _save(self, book: NewBook, placeholder: bool = False) -> None:
-        """placeholder: saved without details, hidden, with a needs_details review flag."""
+    def _ask_volume(self) -> float | None:
+        series = self.defaults.series
+        guess = self.last_volume + 1 if self.last_volume is not None else None
+        hint = f"[{guess:g}]" if guess is not None else "(Enter = none)"
+        while True:
+            reply = self.read(f"  Volume in {series} {hint}: ").strip()
+            if not reply:
+                return guess
+            if reply == "-":
+                return None
+            volume = parse_volume(reply)
+            if volume is not None:
+                return volume
+            self.say(f"{self.bell}  Type a number like 3 or 2.5, - for none, or Enter for {hint}.")
+
+    def _place_in_series(self, book: NewBook) -> None:
+        """--series: "Kaiju No. 8, Vol. 3" -> title "Kaiju No. 8", vol. 3; else ask."""
+        book.series = self.defaults.series
+        split = split_volume(book.title)
+        if split:
+            _, book.series_index, book.title = split
+        elif book.subtitle and (volume := parse_volume(book.subtitle)) is not None:
+            book.series_index, book.subtitle = (
+                volume,
+                None,
+            )  # title "Kaiju No. 8", subtitle "Vol. 3"
+        else:
+            book.series_index = self._ask_volume()
+
+    def _save(self, book: NewBook, placeholder: bool = False, suggested: list[str] = ()) -> None:
+        """placeholder: saved without details, hidden, with a needs_details review flag.
+        suggested: genres matched from Open Library's subjects, added to the session's tags."""
         d = self.defaults
         book.shelf, book.line, book.condition, book.format = d.shelf, d.line, d.condition, d.format
-        book.tags = list(d.tags)
+        given = {normalize_text(t) for t in d.tags}
+        suggested = [g for g in suggested if normalize_text(g) not in given]
+        book.tags = [*d.tags, *suggested]
+        if d.series:
+            self._place_in_series(book)
         if d.hidden:
             book.is_public = False
         if (
@@ -238,6 +282,9 @@ class Session:
         self.counts.added += 1
         self.counts.later += placeholder
         self.last_seen = book_id
+        previous_volume = self.last_volume
+        if book.series_index is not None:
+            self.last_volume = book.series_index
 
         def undo() -> None:
             with self.conn:
@@ -245,6 +292,7 @@ class Session:
             self.counts.added -= 1
             self.counts.later -= placeholder
             self.last_seen = None
+            self.last_volume = previous_volume
 
         self.undo.append((f"removed #{book_id} {book.title}", undo))
         if placeholder:
@@ -253,8 +301,11 @@ class Session:
             )
             return
         authors = ", ".join(c.name for c in book.credits)
-        details = " — ".join(str(p) for p in (book.title, authors, book.pub_year) if p)
+        volume = f"vol. {book.series_index:g}" if book.series_index is not None else None
+        details = " — ".join(str(p) for p in (book.title, volume, authors, book.pub_year) if p)
         self.say(f"  Added #{book_id}  {details}")
+        if suggested:
+            self.say(f"    genres from Open Library: {', '.join(suggested)}")
         if duplicates:
             self.say(
                 f"{self.bell}  Careful: this looks like book #{duplicates[0]}. Type u if it's the same."

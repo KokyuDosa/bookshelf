@@ -36,6 +36,15 @@ class Found:
     pages: int | None = None
     cover_url: str | None = None
     ol_edition_key: str | None = None
+    subjects: list[str] = field(default_factory=list)  # for genre suggestions; not stored
+
+
+def _names(items: object) -> list[str]:
+    """Subjects come as [{"name": …, "url": …}], occasionally as plain strings."""
+    if not isinstance(items, list):
+        return []
+    names = (i.get("name") if isinstance(i, dict) else i for i in items)
+    return [" ".join(n.split()) for n in names if isinstance(n, str) and n.strip()]
 
 
 def http_get(url: str, user_agent: str, timeout: float = 15) -> tuple[int, str]:
@@ -65,6 +74,7 @@ def parse(record: dict) -> Found:
         pages=pages if isinstance(pages, int) and pages > 0 else None,
         cover_url=(record.get("cover") or {}).get("medium"),
         ol_edition_key=(openlibrary_ids[0] if openlibrary_ids else key) or None,
+        subjects=_names(record.get("subjects")),
     )
 
 
