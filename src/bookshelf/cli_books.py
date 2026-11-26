@@ -5,6 +5,7 @@ import datetime as dt
 import json
 import sqlite3
 import sys
+from collections.abc import Callable
 from contextlib import closing
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from bookshelf.catalog import (
     rekey_all,
 )
 from bookshelf.db import connect
+from bookshelf.deploy import DeployCheck, gh_runner, report
 from bookshelf.editing import (
     CLEARABLE,
     Edit,
@@ -39,7 +41,7 @@ from bookshelf.isbn import InvalidISBN, canonical_barcode, to_isbn13
 from bookshelf.normalize import normalize_text
 from bookshelf.openlibrary import LookupFailed, OpenLibrary
 from bookshelf.paths import PROJECT_ROOT
-from bookshelf.publish import PublishError, publish
+from bookshelf.publish import PublishError, publish, pushed_commit
 from bookshelf.scan import Defaults, Session
 from bookshelf.search import (
     browse_order,
@@ -618,16 +620,54 @@ def cmd_publish(args: argparse.Namespace) -> int:
         return 1
     conn.close()
     ask_first = interactive() and not args.yes
-    try:
-        publish(
-            args.db,
-            PROJECT_ROOT,
-            run_tests=not args.no_tests,
-            push=not args.no_push,
-            confirm=confirm if ask_first else (lambda _: True),
+    if not args.check:
+        try:
+            publish(
+                args.db,
+                PROJECT_ROOT,
+                run_tests=not args.no_tests,
+                push=not args.no_push,
+                confirm=confirm if ask_first else (lambda _: True),
+            )
+        except PublishError as exc:
+            return fail(f"Publish stopped: {exc}")
+        if args.no_push or args.no_wait:
+            return 0
+    return check_deploy(retry=(lambda q: confirm(q)) if ask_first else (lambda _: True))
+
+
+def check_deploy(retry: Callable[[str], bool], repo: Path = PROJECT_ROOT) -> int:
+    """Wait for GitHub's test-and-deploy run of the pushed commit, and say how it went.
+    0: the site is live (or the check couldn't run); 1: the deploy failed."""
+    gh = gh_runner(repo)
+    if gh is None:
+        print(
+            "Can't check whether the website updated: the GitHub CLI (gh) isn't installed. "
+            "Look at the Actions tab on GitHub."
         )
-    except PublishError as exc:
-        return fail(f"Publish stopped: {exc}")
+        return 0
+    sha, ahead = pushed_commit(repo)
+    if sha is None:
+        print("Can't check the deploy: this branch isn't connected to GitHub (no upstream).")
+        return 0
+    if ahead:
+        print("Your latest commit isn't on GitHub yet (git push); checking the one that is.")
+    checker = DeployCheck(gh)
+    try:
+        outcome = checker.check(sha)
+        if outcome.state in ("failed", "cancelled"):
+            report(outcome, print)
+            if retry("Try the deploy again?"):
+                outcome = checker.rerun(outcome)
+            else:
+                return 1
+    except KeyboardInterrupt:
+        print("\nStopped waiting; GitHub carries on. Check later with: bookshelf publish --check")
+        return 0
+    if outcome.state in ("failed", "cancelled"):
+        report(outcome, print)
+        return 1
+    report(outcome, print, site=checker.site_url() if outcome.state == "live" else None)
     return 0
 
 
@@ -862,4 +902,14 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--yes", "-y", action="store_true", help="don't ask before committing")
     p.add_argument("--no-tests", action="store_true", help="skip the test run")
     p.add_argument("--no-push", action="store_true", help="commit but don't push")
+    p.add_argument(
+        "--no-wait",
+        action="store_true",
+        help="push without waiting to see whether GitHub's deploy succeeded",
+    )
+    p.add_argument(
+        "--check",
+        action="store_true",
+        help="don't publish; just check (and offer to retry) the last deploy",
+    )
     p.set_defaults(func=cmd_publish)

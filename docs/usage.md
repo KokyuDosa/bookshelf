@@ -463,16 +463,34 @@ Its corrections file is `data\imports\mylist-corrections.toml`.
 `bookshelf publish` updates the website in one go:
 
 1. It writes the public list to `site\data\books.json` and `site\data\books.csv`.
-2. If nothing changed since the last publish, it stops there.
-3. Otherwise it runs the tests and shows a summary, e.g. "237 books: 12 added, 3 changed,
-   0 removed".
-4. It asks, then commits those two files and pushes. GitHub rebuilds the site in a minute or two.
+2. If anything changed since the last publish, it runs the tests and shows a summary, e.g.
+   "237 books: 12 added, 3 changed, 0 removed". It asks, then commits those two files and pushes.
+3. It waits while GitHub tests and deploys the site (usually under a minute), showing each step,
+   and tells you whether the website actually updated:
+
+   ```
+   Waiting for GitHub to test and deploy (Ctrl+C stops waiting, not GitHub)…
+     test: ok
+     build: ok
+     deploy: ok
+   The website is up to date: https://kokyudosa.github.io/bookshelf/
+   ```
+
+   If the deploy fails, it names the failed step and asks whether to try again. Many failures
+   are hiccups on GitHub's side, and a second try fixes them. If it fails again, run
+   `gh run view <run> --log-failed` (it prints the exact command) to see why.
+
+Step 3 happens even when there's nothing new to publish, so `publish` also tells you whether the
+*last* deploy got through. Checking needs the GitHub CLI (`gh`), logged in; without it,
+`publish` says so and you check the Actions tab yourself.
 
 | Option | Does |
 | --- | --- |
-| `--yes` | don't ask before committing |
+| `--yes` | don't ask before committing, and retry a failed deploy without asking |
 | `--no-tests` | skip the test run |
 | `--no-push` | commit but don't push (push later with `git push`) |
+| `--no-wait` | push without waiting for GitHub's deploy |
+| `--check` | don't publish; just check the last deploy, and offer to retry it if it failed |
 
 `publish` commits only the book list. When you change the code itself (after an update, say),
 commit and push that yourself; see [Updating bookshelf](#updating-bookshelf).
@@ -581,5 +599,6 @@ migrate before importing.
 | "run 'bookshelf migrate'" | the code is newer than your database: run `bookshelf migrate` |
 | `edit #56` does nothing | `#` starts a PowerShell comment: write `edit 56` |
 | "Nothing to publish" | the website already shows this collection |
-| The website hasn't changed after publishing | check the Actions tab on GitHub, then reload; your phone may show the old page for a few minutes |
+| The website hasn't changed after publishing | run `bookshelf publish --check`: it says whether the last deploy failed and can retry it. If it got through, reload; your phone may show the old page for a few minutes |
+| "Couldn't check the deploy" | `gh` isn't logged in: run `gh auth login` |
 | A scanner types digits but nothing happens | it isn't sending Enter: turn on its Enter (CR) suffix |

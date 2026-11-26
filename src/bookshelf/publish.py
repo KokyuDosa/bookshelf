@@ -87,3 +87,14 @@ def publish(
             raise PublishError(f"committed, but git push failed: {pushed.stderr.strip()}")
         say("Pushed. GitHub rebuilds the site in a minute or two.")
     return True
+
+
+def pushed_commit(repo: Path) -> tuple[str | None, bool]:
+    """(the commit GitHub has for this branch, whether your local branch is ahead of it)."""
+    upstream = _git(repo, "rev-parse", "@{u}")
+    if upstream.returncode != 0:
+        return None, False
+    head = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    sha = upstream.stdout.strip()
+    ahead = _git(repo, "merge-base", "--is-ancestor", "HEAD", "@{u}").returncode != 0
+    return sha, ahead and head != sha
