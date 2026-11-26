@@ -2,7 +2,7 @@
 
 Run every command from the project folder in the VS Code terminal, with the virtual environment
 active: the prompt shows `(.venv)`, or run `.venv\Scripts\Activate.ps1`. Your website is
-**https://kokyudosa.github.io/bookshelf/**.
+**<https://kokyudosa.github.io/bookshelf/>**.
 
 Every command explains its options with `--help`, for example `bookshelf edit --help`.
 
@@ -81,7 +81,7 @@ bookshelf scan --shelf "Office 3" --tag Philosophy     # applied to every book t
 bookshelf scan --tag Manga --series "Kaiju No. 8"      # one series, volume by volume
 ```
 
-```
+```powershell
 scan> 9780786928866
   Added #240  Player's Handbook — Jonathan Tweet, Monte Cook, Skip Williams — 2003
 scan> 9781568823348
@@ -124,7 +124,7 @@ While scanning, type:
   title ("Kaiju No. 8, Vol. 3" becomes title "Kaiju No. 8", vol. 3) or subtitle ("Vol. 3").
   When there's none, you're asked:
 
-  ```
+  ```text
     Volume in Kaiju No. 8 [4]:
   ```
 
@@ -137,6 +137,7 @@ While scanning, type:
   several.
 
 **Setting up the scanner:**
+
 1. Plug it in and scan a book into Notepad. It should type the digits and start a new line.
 2. If it doesn't press Enter after each code, turn on its "Enter suffix" (or "CR suffix") by
    scanning the setup barcode in its manual.
@@ -468,7 +469,7 @@ Its corrections file is `data\imports\mylist-corrections.toml`.
 3. It waits while GitHub tests and deploys the site (usually under a minute), showing each step,
    and tells you whether the website actually updated:
 
-   ```
+   ```text
    Waiting for GitHub to test and deploy (Ctrl+C stops waiting, not GitHub)…
      test: ok
      build: ok
